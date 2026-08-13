@@ -8,6 +8,8 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- Conversion HEIC/HEIF (photos iPhone) → JPEG côté navigateur avant upload -->
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -113,8 +115,108 @@ const SUPABASE_URL = "https://gdyavvhquzgvmsckszmi.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_E_69V4DOdDaDSw9Lf9xJ4A_Jhbo0xJX";
 const SUPABASE_BUCKET = "product-images";
 
-const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-const EXT_BY_MIME = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp" };
+// Formats acceptés dans le sélecteur de fichiers et lors de l'upload.
+// HEIC/HEIF (format par défaut des photos iPhone) sont convertis en JPEG
+// côté navigateur avant l'envoi vers Supabase — voir convertHeicIfNeeded().
+const ACCEPTED_IMAGE_TYPES = [
+  "image/jpeg", "image/jpg", "image/png", "image/webp",
+  "image/heic", "image/heif",
+];
+const EXT_BY_MIME = {
+  "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp",
+  "image/heic": "heic", "image/heif": "heif",
+};
+
+// L'attribut "accept" du <input type="file"> : on liste à la fois les types
+// MIME connus et les extensions, car iOS ne renseigne pas toujours file.type
+// correctement pour le HEIC/HEIF — les extensions servent de filet de sécurité
+// pour que la pellicule affiche bien ces photos comme sélectionnables.
+const FILE_INPUT_ACCEPT =
+  "image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif";
+
+// -------- Détection HEIC/HEIF fiable --------
+// Sur iPhone/Safari, un fichier de la pellicule peut arriver avec file.type
+// vide ("") ou générique ("application/octet-stream"), même si son contenu
+// réel est du HEIC. On ne peut donc PAS se fier uniquement à file.type ni au
+// nom du fichier (ex: "IMG_1234" n'est pas une extension, juste un nom).
+// On vérifie donc en plus la signature binaire réelle du fichier (les
+// premiers octets, "magic bytes"), qui ne mentent jamais sur le format.
+async function isHeicFile(file) {
+  const type = (file.type || "").toLowerCase();
+  if (type === "image/heic" || type === "image/heif") return true;
+
+  const name = (file.name || "").toLowerCase();
+  const looksHeicByName = name.endsWith(".heic") || name.endsWith(".heif");
+
+  // Les conteneurs HEIC/HEIF sont des fichiers ISOBMFF : les octets 4 à 11
+  // contiennent "ftyp" suivi d'un identifiant de marque (ex: "heic", "mif1").
+  try {
+    const header = await file.slice(0, 12).arrayBuffer();
+    const bytes = new Uint8Array(header);
+    const ascii = String.fromCharCode(...bytes.slice(4, 12));
+    const isIsobmffHeic = ascii.startsWith("ftyp") && /heic|heix|hevc|hevx|mif1|msf1/.test(ascii);
+    return isIsobmffHeic || (looksHeicByName && type === "");
+  } catch {
+    return looksHeicByName; // en dernier recours, si la lecture binaire échoue
+  }
+}
+
+// -------- Chargement paresseux de la librairie de conversion HEIC --------
+// heic2any n'est pas dans les librairies pré-importables de cet environnement.
+// Dans le fichier index.html autonome, la librairie est préchargée via une
+// balise <script src="..."> dans le <head> ; ici, on l'injecte dynamiquement
+// au moment où on en a réellement besoin (première photo HEIC sélectionnée),
+// et on la met en cache pour ne la charger qu'une seule fois. Si le script
+// est déjà présent (cas du index.html), on le détecte et on ne recharge rien.
+let heic2anyLoadingPromise = null;
+function loadHeic2any() {
+  if (typeof window !== "undefined" && typeof window.heic2any === "function") {
+    return Promise.resolve();
+  }
+  if (heic2anyLoadingPromise) return heic2anyLoadingPromise;
+
+  heic2anyLoadingPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Impossible de charger le convertisseur HEIC"));
+    document.head.appendChild(script);
+  });
+  return heic2anyLoadingPromise;
+}
+
+// -------- Conversion HEIC/HEIF → JPEG côté navigateur --------
+// Le navigateur ne sait pas afficher ni encoder du HEIC via <img>/<canvas>,
+// donc on utilise la librairie "heic2any" (préchargée dans index.html, ou
+// chargée à la demande via loadHeic2any() sinon). La conversion se fait AVANT l'upload,
+// afin que Supabase Storage ne reçoive que du JPEG, directement affichable
+// partout (iPhone, Android, ordinateur, tous navigateurs).
+async function convertHeicIfNeeded(file) {
+  const heic = await isHeicFile(file);
+  if (!heic) return file;
+
+  try {
+    await loadHeic2any();
+  } catch (err) {
+    throw new Error("Conversion HEIC indisponible (échec de chargement)");
+  }
+  if (typeof window.heic2any !== "function") {
+    throw new Error("Conversion HEIC indisponible (librairie non chargée)");
+  }
+
+  const convertedBlob = await window.heic2any({
+    blob: file,
+    toType: "image/jpeg",
+    quality: 0.9, // bonne qualité visuelle, taille de fichier raisonnable
+  });
+  // heic2any peut renvoyer un tableau de blobs pour les HEIC "live photo" à
+  // plusieurs images ; on ne garde que la première pour la photo produit.
+  const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+
+  const originalName = (file.name || "photo").replace(/\.(heic|heif)$/i, "");
+  return new File([blob], `${originalName}.jpg`, { type: "image/jpeg" });
+}
 
 function makeStoragePath(file) {
   const ext = EXT_BY_MIME[file.type] || "jpg";
@@ -123,23 +225,26 @@ function makeStoragePath(file) {
 }
 
 // Upload réel vers Supabase Storage (bucket "product-images").
+// Convertit d'abord le fichier s'il s'agit d'un HEIC/HEIF, puis upload.
 // Renvoie l'URL publique du fichier, ou lève une erreur en cas d'échec.
 async function uploadToSupabase(file) {
-  if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+  const usableFile = await convertHeicIfNeeded(file);
+
+  if (!ACCEPTED_IMAGE_TYPES.includes(usableFile.type)) {
     throw new Error("Format non supporté");
   }
-  const path = makeStoragePath(file);
+  const path = makeStoragePath(usableFile);
   const uploadUrl = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`;
 
   const res = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      "Content-Type": file.type,
+      "Content-Type": usableFile.type,
       "apikey": SUPABASE_PUBLISHABLE_KEY,
       "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
       "x-upsert": "false",
     },
-    body: file,
+    body: usableFile,
   });
 
   if (!res.ok) {
@@ -1028,10 +1133,20 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
 
-    setUploadStatus("uploading");
+    // Affiche "Conversion des photos HEIC…" seulement si la sélection en contient,
+    // sinon on passe directement à "Upload des photos…".
+    const heicFlags = await Promise.all(files.map((f) => isHeicFile(f)));
+    setUploadStatus(heicFlags.some(Boolean) ? "converting" : "uploading");
     setUploadErrors([]);
 
-    const results = await Promise.allSettled(files.map((file) => uploadToSupabase(file)));
+    const results = await Promise.allSettled(
+      files.map(async (file) => {
+        const uploaded = await uploadToSupabase(file);
+        return uploaded;
+      })
+    );
+
+    setUploadStatus("uploading");
 
     const newUrls = [];
     const failed = [];
@@ -1294,13 +1409,18 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/jpeg,image/jpg,image/png,image/webp"
+                accept={FILE_INPUT_ACCEPT}
                 multiple
                 className="hidden"
                 onChange={onFileInputChange}
               />
-              <GhostButton onClick={openFilePicker}>+ Ajouter des photos</GhostButton>
+              <GhostButton onClick={openFilePicker}>📸 Ajouter des photos depuis mon téléphone</GhostButton>
 
+              {uploadStatus === "converting" && (
+                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
+                  Conversion des photos HEIC…
+                </div>
+              )}
               {uploadStatus === "uploading" && (
                 <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
                   Upload des photos…
@@ -1317,7 +1437,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 </div>
               )}
               <p className="text-[11px] mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-                Formats acceptés : JPG, JPEG, PNG, WEBP. Vous pouvez sélectionner plusieurs photos à la fois.
+                Formats acceptés : HEIC, HEIF, JPG, JPEG, PNG, WEBP. Les photos HEIC (pellicule iPhone) sont converties automatiquement en JPEG. Vous pouvez sélectionner plusieurs photos à la fois.
               </p>
             </div>
 
