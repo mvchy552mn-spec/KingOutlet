@@ -1,0 +1,1881 @@
+import React, { useState, useMemo, useRef, useEffect } from "react";
+
+/* ============================================================
+   MAISON NOVARE — plateforme catalogue premium
+   Palette : noir #0B0B0C / blanc cassé #F3F1EA / champagne #C9A961
+             graphite #17171A / bronze #7A6A48
+   Display : "Anton" (titres XXL) — Body : "Inter" — Mono : "IBM Plex Mono" (référence produit)
+   Signature : étiquette diagonale "tag de vêtement" utilisée comme motif structurel
+   ============================================================ */
+
+const FONT_IMPORT = `
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+`;
+
+const COLORS = {
+  bg: "#0B0B0C",
+  surface: "#17171A",
+  surface2: "#1F1F23",
+  line: "#2B2B30",
+  ink: "#F3F1EA",
+  inkDim: "#A9A69C",
+  gold: "#C9A961",
+  goldDim: "#8C7A54",
+};
+
+/* ---------------- Demo data (fictitious brands, placeholder imagery) ---------------- */
+
+const CATEGORIES = [
+  { id: "chaussures", name: "Chaussures", tag: "01", desc: "Sneakers & silhouettes signature" },
+  { id: "vetements", name: "Vêtements", tag: "02", desc: "Prêt-à-porter urbain premium" },
+  { id: "sacs", name: "Sacs", tag: "03", desc: "Maroquinerie & pièces du quotidien" },
+  { id: "accessoires", name: "Accessoires", tag: "04", desc: "Détails qui font la différence" },
+  { id: "casquettes", name: "Casquettes", tag: "05", desc: "Headwear signature" },
+  { id: "montres", name: "Montres", tag: "06", desc: "Horlogerie contemporaine" },
+];
+
+const BRANDS = [
+  { id: "novare-originals", name: "Novare Originals", description: "La ligne cœur de Maison Novare — silhouettes signature et pièces intemporelles." },
+  { id: "atelier-noir", name: "Atelier Noir", description: "Façon artisanale, teintes profondes, coupes précises." },
+  { id: "urban-forge", name: "Urban Forge", description: "Streetwear technique pensé pour la ville." },
+  { id: "blackout-lab", name: "Blackout Lab", description: "Recherche matière et éditions limitées." },
+  { id: "gilt-co", name: "Gilt & Co", description: "Horlogerie et bijouterie contemporaine." },
+  { id: "velour-house", name: "Velour House", description: "Maroquinerie douce, finitions haut de gamme." },
+];
+
+const COLOR_SWATCHES = {
+  "Noir": "#111113",
+  "Champagne": "#C9A961",
+  "Blanc Cassé": "#EDE9DF",
+  "Gris Ardoise": "#5C5C63",
+  "Bordeaux": "#5C2430",
+  "Kaki": "#5A5842",
+};
+
+const img = (seed, w = 900, h = 1100) => `https://picsum.photos/seed/${seed}/${w}/${h}`;
+
+/* Fallback shown whenever an <img> fails to load (broken URL, blocked hotlinking,
+   wrong domain, etc). Swaps the src instead of leaving a broken-image icon so the
+   admin and the visitor both get a clear, on-brand signal. */
+const BROKEN_IMAGE_FALLBACK =
+  "data:image/svg+xml;charset=UTF-8," +
+  encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='400' height='500'>
+       <rect width='100%' height='100%' fill='${COLORS.surface2}'/>
+       <text x='50%' y='48%' fill='${COLORS.inkDim}' font-family='sans-serif' font-size='16' text-anchor='middle'>Image indisponible</text>
+       <text x='50%' y='58%' fill='${COLORS.goldDim}' font-family='sans-serif' font-size='12' text-anchor='middle'>URL invalide ou bloquée</text>
+     </svg>`
+  );
+
+function handleImgError(e) {
+  // avoid infinite loop if the fallback itself somehow errors
+  e.currentTarget.onerror = null;
+  e.currentTarget.src = BROKEN_IMAGE_FALLBACK;
+}
+
+/* ============================================================
+   SUPABASE STORAGE — intégration active
+   ------------------------------------------------------------
+   Upload / suppression réels dans le bucket "product-images" du
+   projet Supabase, via l'API REST Storage (fetch), sans dépendre
+   du SDK @supabase/supabase-js (non disponible dans cet environnement
+   d'artifact).
+
+   Clé utilisée : clé "publishable" (publique), prévue pour être
+   exposée côté navigateur. Pour que l'upload et la suppression
+   fonctionnent réellement, le bucket "product-images" doit être
+   configuré côté Supabase avec des policies RLS autorisant
+   l'INSERT/DELETE pour le rôle utilisé ici (anon ou authenticated
+   selon votre configuration d'accès à l'admin).
+
+   L'écriture dans la table "product_images" (product_id, image_url,
+   sort_order, is_primary) reste à faire au moment où le produit est
+   enregistré (saveProduct), à partir du tableau editing.images —
+   voir le commentaire TODO SUPABASE à cet endroit plus bas.
+   ============================================================ */
+
+const SUPABASE_URL = "https://gdyavvhquzgvmsckszmi.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_E_69V4DOdDaDSw9Lf9xJ4A_Jhbo0xJX";
+const SUPABASE_BUCKET = "product-images";
+
+// Formats acceptés dans le sélecteur de fichiers et lors de l'upload.
+// HEIC/HEIF (format par défaut des photos iPhone) sont convertis en JPEG
+// côté navigateur avant l'envoi vers Supabase — voir convertHeicIfNeeded().
+const ACCEPTED_IMAGE_TYPES = [
+  "image/jpeg", "image/jpg", "image/png", "image/webp",
+  "image/heic", "image/heif",
+];
+const EXT_BY_MIME = {
+  "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp",
+  "image/heic": "heic", "image/heif": "heif",
+};
+
+// L'attribut "accept" du <input type="file"> : on liste les types MIME connus,
+// les extensions, ET "image/*" en filet de sécurité, car iOS ne renseigne pas
+// toujours file.type correctement pour le HEIC/HEIF ou certains partages —
+// ainsi la pellicule et l'app Fichiers proposent bien toutes les photos.
+const FILE_INPUT_ACCEPT =
+  "image/*,image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif";
+
+// -------- Détection du type réel d'un fichier par sa signature binaire --------
+// file.type est déclaré par le NAVIGATEUR/OS, pas garanti : sur iOS (Safari,
+// app Fichiers, partages tiers), il arrive vide ("") ou générique
+// ("application/octet-stream") même pour un JPG ou PNG parfaitement valide.
+// On ne doit donc JAMAIS bloquer un fichier uniquement parce que file.type
+// est vide — on vérifie plutôt les premiers octets réels du fichier
+// ("magic bytes"), qui ne mentent jamais sur le format.
+async function detectRealImageType(file) {
+  try {
+    const buf = await file.slice(0, 12).arrayBuffer();
+    const b = new Uint8Array(buf);
+
+    // JPEG: FF D8 FF
+    if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+    // WEBP: "RIFF"...."WEBP"
+    if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) return "image/webp";
+    // HEIC/HEIF (ISOBMFF): octets 4-11 = "ftyp" + marque
+    const ascii = String.fromCharCode(...b.slice(4, 12));
+    if (ascii.startsWith("ftyp") && /heic|heix|hevc|hevx|mif1|msf1/.test(ascii)) return "image/heic";
+  } catch {
+    // lecture binaire impossible → on retombe sur file.type plus bas
+  }
+  return null;
+}
+
+// -------- Détection HEIC/HEIF fiable --------
+// Sur iPhone/Safari, un fichier de la pellicule peut arriver avec file.type
+// vide ("") ou générique ("application/octet-stream"), même si son contenu
+// réel est du HEIC. On ne peut donc PAS se fier uniquement à file.type ni au
+// nom du fichier (ex: "IMG_1234" n'est pas une extension, juste un nom).
+// On vérifie donc en plus la signature binaire réelle du fichier (les
+// premiers octets, "magic bytes"), qui ne mentent jamais sur le format.
+async function isHeicFile(file) {
+  const type = (file.type || "").toLowerCase();
+  if (type === "image/heic" || type === "image/heif") return true;
+
+  const name = (file.name || "").toLowerCase();
+  const looksHeicByName = name.endsWith(".heic") || name.endsWith(".heif");
+
+  const realType = await detectRealImageType(file);
+  if (realType === "image/heic") return true;
+  if (realType) return false; // signature détectée et ce n'est PAS du HEIC → certitude
+
+  return looksHeicByName; // aucune signature reconnue, on se rabat sur le nom
+}
+
+// -------- Chargement paresseux de la librairie de conversion HEIC --------
+// heic2any n'est pas dans les librairies pré-importables de cet environnement.
+// Dans le fichier index.html autonome, la librairie est préchargée via une
+// balise <script src="..."> dans le <head> ; ici, on l'injecte dynamiquement
+// au moment où on en a réellement besoin (première photo HEIC sélectionnée),
+// et on la met en cache pour ne la charger qu'une seule fois. Si le script
+// est déjà présent (cas du index.html), on le détecte et on ne recharge rien.
+let heic2anyLoadingPromise = null;
+function loadHeic2any() {
+  if (typeof window !== "undefined" && typeof window.heic2any === "function") {
+    return Promise.resolve();
+  }
+  if (heic2anyLoadingPromise) return heic2anyLoadingPromise;
+
+  heic2anyLoadingPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Impossible de charger le convertisseur HEIC"));
+    document.head.appendChild(script);
+  });
+  return heic2anyLoadingPromise;
+}
+
+// -------- Conversion HEIC/HEIF → JPEG côté navigateur --------
+// Le navigateur ne sait pas afficher ni encoder du HEIC via <img>/<canvas>,
+// donc on utilise la librairie "heic2any" (préchargée dans index.html, ou
+// chargée à la demande via loadHeic2any() sinon). La conversion se fait AVANT l'upload,
+// afin que Supabase Storage ne reçoive que du JPEG, directement affichable
+// partout (iPhone, Android, ordinateur, tous navigateurs).
+async function convertHeicIfNeeded(file) {
+  const heic = await isHeicFile(file);
+  if (!heic) return file;
+
+  try {
+    await loadHeic2any();
+  } catch (err) {
+    throw new Error("Conversion HEIC indisponible (échec de chargement)");
+  }
+  if (typeof window.heic2any !== "function") {
+    throw new Error("Conversion HEIC indisponible (librairie non chargée)");
+  }
+
+  const convertedBlob = await window.heic2any({
+    blob: file,
+    toType: "image/jpeg",
+    quality: 0.9, // bonne qualité visuelle, taille de fichier raisonnable
+  });
+  // heic2any peut renvoyer un tableau de blobs pour les HEIC "live photo" à
+  // plusieurs images ; on ne garde que la première pour la photo produit.
+  const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+
+  const originalName = (file.name || "photo").replace(/\.(heic|heif)$/i, "");
+  return new File([blob], `${originalName}.jpg`, { type: "image/jpeg" });
+}
+
+// Libellés affichés dans le panneau de debug pour chaque étape de la chaîne d'upload.
+const STEP_LABELS = {
+  selection: "Sélection du fichier",
+  conversion: "Conversion",
+  connexion: "Connexion à Supabase",
+  upload: "Upload vers Supabase Storage",
+  url: "URL publique générée",
+};
+
+function makeStoragePath(realType) {
+  const ext = EXT_BY_MIME[realType] || "jpg";
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `admin/${Date.now()}-${rand}.${ext}`;
+}
+
+// Upload réel vers Supabase Storage (bucket "product-images").
+// Convertit d'abord le fichier s'il s'agit d'un HEIC/HEIF, puis upload.
+// IMPORTANT : ne rejette JAMAIS un fichier uniquement parce que file.type
+// (déclaré par le navigateur) est vide ou générique — on se base sur le
+// contenu réel du fichier (signature binaire) pour décider, et un fichier
+// est refusé seulement si sa signature ne correspond à AUCUN format image
+// connu (JPEG/PNG/WEBP/HEIC) ET que son nom ne laisse rien deviner non plus.
+//
+// Renvoie { publicUrl, path, steps } où "steps" trace chaque étape pour le
+// panneau de debug (voir DEBUG SYSTEM plus bas) : "selection", "conversion",
+// "connexion", "upload", "url".
+async function uploadToSupabase(file, onStep) {
+  const trace = (step, ok, detail) => onStep && onStep(step, ok, detail);
+
+  trace("selection", true, `${file.name || "(sans nom)"} — type déclaré: "${file.type || "(vide)"}"`);
+
+  // Étape 1 - Déterminer le type réel du fichier à partir de son contenu, pas de
+  //    file.type (qui peut être vide/faux sur iOS).
+  const realType = await detectRealImageType(file);
+  const looksHeicByName = /\.(heic|heif)$/i.test(file.name || "");
+  const effectiveType = realType || (ACCEPTED_IMAGE_TYPES.includes(file.type) ? file.type : null);
+
+  if (!effectiveType && !looksHeicByName) {
+    trace("conversion", false, "Signature binaire non reconnue comme image (JPEG/PNG/WEBP/HEIC)");
+    throw new Error("Ce fichier ne semble pas être une image supportée");
+  }
+
+  // Étape 2 - Conversion HEIC → JPEG si nécessaire.
+  let usableFile = file;
+  const isHeic = effectiveType === "image/heic" || (!realType && looksHeicByName);
+  if (isHeic) {
+    try {
+      usableFile = await convertHeicIfNeeded(file);
+      trace("conversion", true, `Converti en JPEG (${(usableFile.size / 1024).toFixed(0)} Ko)`);
+    } catch (err) {
+      trace("conversion", false, err.message || String(err));
+      throw err;
+    }
+  } else {
+    // Fichier déjà dans un format web standard : on force le type MIME réel
+    // sur l'objet File envoyé à Supabase, au cas où file.type était vide,
+    // pour que le fichier stocké ait un Content-Type correct.
+    usableFile = effectiveType && effectiveType !== file.type
+      ? new File([file], file.name || "photo", { type: effectiveType })
+      : file;
+    trace("conversion", true, "Aucune conversion nécessaire");
+  }
+
+  const finalType = usableFile.type || effectiveType || "image/jpeg";
+  const path = makeStoragePath(finalType);
+  const uploadUrl = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`;
+
+  // Étape 3 - Upload effectif vers Supabase Storage.
+  let res;
+  try {
+    res = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": finalType,
+        "apikey": SUPABASE_PUBLISHABLE_KEY,
+        "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        "x-upsert": "false",
+      },
+      body: usableFile,
+    });
+  } catch (networkErr) {
+    trace("connexion", false, `Requête réseau impossible vers Supabase : ${networkErr.message || networkErr}`);
+    throw new Error(`Connexion à Supabase impossible : ${networkErr.message || networkErr}`);
+  }
+
+  trace("connexion", true, `Réponse reçue du serveur Supabase (HTTP ${res.status})`);
+
+  if (!res.ok) {
+    // On récupère le VRAI message d'erreur renvoyé par Supabase (JSON avec
+    // souvent { statusCode, error, message }), plutôt qu'un texte générique.
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      detail = body.message || body.error || JSON.stringify(body);
+    } catch {
+      try { detail = await res.text(); } catch {}
+    }
+    trace("upload", false, detail);
+    throw new Error(`Upload Supabase Storage échoué (${res.status}) : ${detail}`);
+  }
+  trace("upload", true, `Fichier stocké sous ${SUPABASE_BUCKET}/${path}`);
+
+  // Étape 4 - URL publique du fichier (le bucket doit être configuré en accès public en lecture).
+  const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`;
+  trace("url", true, publicUrl);
+  return { publicUrl, path };
+}
+
+// Extrait le "path" interne au bucket à partir d'une URL publique Supabase Storage,
+// pour pouvoir la supprimer. Retourne null si l'URL ne vient pas de ce bucket
+// (ex: ancien placeholder de démo picsum.photos) — dans ce cas on ne tente pas
+// de suppression côté Storage, on retire juste la photo de l'admin.
+function extractSupabasePath(imageUrl) {
+  const marker = `/storage/v1/object/public/${SUPABASE_BUCKET}/`;
+  const idx = imageUrl.indexOf(marker);
+  if (idx === -1) return null;
+  return imageUrl.slice(idx + marker.length);
+}
+
+// Suppression réelle du fichier dans Supabase Storage.
+async function deleteFromSupabase(imageUrl) {
+  const path = extractSupabasePath(imageUrl);
+  if (!path) return; // pas une URL Supabase (ex: placeholder de démo) → rien à supprimer côté Storage
+  const deleteUrl = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`;
+  const res = await fetch(deleteUrl, {
+    method: "DELETE",
+    headers: {
+      "apikey": SUPABASE_PUBLISHABLE_KEY,
+      "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+    },
+  });
+  if (!res.ok) {
+    // On n'interrompt pas le flux admin pour autant : la photo est déjà
+    // retirée de l'UI et de l'état local. On journalise pour diagnostic.
+    console.error("Suppression Supabase Storage échouée:", res.status, path);
+  }
+}
+
+function makeProduct(id, name, brandId, categoryId, ref, seedBase, opts = {}) {
+  const nPhotos = opts.photos || 4;
+  return {
+    id,
+    name,
+    brandId,
+    categoryId,
+    reference: ref,
+    description:
+      opts.description ||
+      "Pièce signature Maison Novare pensée pour l'usage quotidien : matières sélectionnées, finitions soignées, coupe étudiée pour durer.",
+    images: Array.from({ length: nPhotos }, (_, i) => img(`${seedBase}-${i}`)),
+    sizes: opts.sizes || ["XS", "S", "M", "L", "XL"],
+    colors: opts.colors || ["Noir", "Champagne"],
+    featured: !!opts.featured,
+    isNew: !!opts.isNew,
+    availability: opts.availability ?? true,
+    price: opts.price || null,
+  };
+}
+
+const INITIAL_PRODUCTS = [
+  makeProduct("p1", "Sneaker Silhouette 01", "novare-originals", "chaussures", "NVR-SN-001", "sneak1", { featured: true, isNew: true, sizes: ["39","40","41","42","43","44"], colors: ["Noir","Blanc Cassé"], photos: 5 }),
+  makeProduct("p2", "Sneaker Trail Forge", "urban-forge", "chaussures", "UFG-SN-014", "sneak2", { isNew: true, sizes: ["40","41","42","43","44","45"], colors: ["Kaki","Noir"] }),
+  makeProduct("p3", "Boot Atelier Cuir", "atelier-noir", "chaussures", "ATN-BT-007", "sneak3", { colors: ["Noir","Bordeaux"], sizes: ["40","41","42","43","44"] }),
+  makeProduct("p4", "Doudoune Shine", "novare-originals", "vetements", "NVR-DD-021", "coat1", { featured: true, colors: ["Noir","Champagne"] }),
+  makeProduct("p5", "Ensemble Monogramme Studio", "blackout-lab", "vetements", "BOL-EN-009", "hoodie1", { isNew: true, colors: ["Champagne","Gris Ardoise"] }),
+  makeProduct("p6", "Veste Technique Forge", "urban-forge", "vetements", "UFG-VT-033", "jacket1", { colors: ["Noir","Kaki"] }),
+  makeProduct("p7", "Pull Col Rond Atelier", "atelier-noir", "vetements", "ATN-PL-012", "sweater1", { colors: ["Gris Ardoise","Noir"] }),
+  makeProduct("p8", "Sac Crossbody Signature", "velour-house", "sacs", "VLH-SC-005", "bag1", { featured: true, sizes: [], colors: ["Noir","Bordeaux"], photos: 5 }),
+  makeProduct("p9", "Sac Weekend Forge", "urban-forge", "sacs", "UFG-SC-019", "bag2", { isNew: true, sizes: [], colors: ["Noir","Kaki"] }),
+  makeProduct("p10", "Pochette Studio", "blackout-lab", "sacs", "BOL-SC-041", "bag3", { sizes: [], colors: ["Champagne","Noir"] }),
+  makeProduct("p11", "Ceinture Cuir Grainé", "atelier-noir", "accessoires", "ATN-CE-002", "acc1", { sizes: ["S","M","L"], colors: ["Noir","Bordeaux"] }),
+  makeProduct("p12", "Foulard Monogramme", "novare-originals", "accessoires", "NVR-FL-010", "acc2", { sizes: [], colors: ["Champagne","Gris Ardoise"], isNew: true }),
+  makeProduct("p13", "Casquette Icône Gold", "novare-originals", "casquettes", "NVR-CQ-006", "cap1", { featured: true, sizes: ["Unique"], colors: ["Noir","Champagne"] }),
+  makeProduct("p14", "Casquette Forge Tech", "urban-forge", "casquettes", "UFG-CQ-023", "cap2", { sizes: ["Unique"], colors: ["Kaki","Noir"] }),
+  makeProduct("p15", "Montre Automatique Royale", "gilt-co", "montres", "GLC-MT-101", "watch1", { featured: true, sizes: [], colors: ["Noir","Champagne"], photos: 5 }),
+  makeProduct("p16", "Montre Chrono All-Black", "gilt-co", "montres", "GLC-MT-118", "watch2", { isNew: true, sizes: [], colors: ["Noir"] }),
+  makeProduct("p17", "Sneaker Studio Low", "blackout-lab", "chaussures", "BOL-SN-027", "sneak4", { sizes: ["38","39","40","41","42"], colors: ["Blanc Cassé","Champagne"] }),
+  makeProduct("p18", "Sac Banane Signature", "novare-originals", "sacs", "NVR-SC-030", "bag4", { sizes: [], colors: ["Noir","Champagne"] }),
+];
+
+/* ---------------- small UI atoms ---------------- */
+
+function Eyebrow({ children }) {
+  return (
+    <div
+      className="inline-flex items-center gap-2 text-xs tracking-widest uppercase font-medium"
+      style={{ color: COLORS.gold, fontFamily: "Inter" }}
+    >
+      <span style={{ width: 18, height: 1, background: COLORS.gold, display: "inline-block" }} />
+      {children}
+    </div>
+  );
+}
+
+function TagCorner() {
+  // signature "clothing tag" motif — diagonal cut corner used across cards
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+        borderStyle: "solid",
+        borderWidth: "0 34px 34px 0",
+        borderColor: `transparent ${COLORS.gold} transparent transparent`,
+      }}
+    />
+  );
+}
+
+function Badge({ children, tone = "gold" }) {
+  const bg = tone === "gold" ? COLORS.gold : COLORS.surface2;
+  const color = tone === "gold" ? "#0B0B0C" : COLORS.ink;
+  return (
+    <span
+      className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest rounded-sm"
+      style={{ background: bg, color, fontFamily: "Inter" }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function GhostButton({ children, onClick, className = "" }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-6 py-3 text-sm uppercase tracking-widest font-semibold border transition-colors ${className}`}
+      style={{ borderColor: COLORS.gold, color: COLORS.ink, fontFamily: "Inter" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.gold, e.currentTarget.style.color = "#0B0B0C")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent", e.currentTarget.style.color = COLORS.ink)}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SolidButton({ children, onClick, className = "" }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-6 py-3 text-sm uppercase tracking-widest font-semibold transition-transform active:scale-95 ${className}`}
+      style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* ---------------- Header ---------------- */
+
+function Header({ route, go, cartCount }) {
+  const [open, setOpen] = useState(false);
+  const links = [
+    ["home", "Accueil"],
+    ["catalog", "Catalogue"],
+    ["collections", "Collections"],
+    ["catalog-new", "Nouveautés"],
+    ["brands", "Marques"],
+    ["about", "À propos"],
+    ["contact", "Contact"],
+  ];
+  return (
+    <header
+      className="sticky top-0 z-40 border-b"
+      style={{ background: "rgba(11,11,12,0.92)", backdropFilter: "blur(10px)", borderColor: COLORS.line }}
+    >
+      <div className="max-w-7xl mx-auto flex items-center justify-between px-5 md:px-8 h-16">
+        <button onClick={() => go("home")} className="flex flex-col items-start leading-none">
+          <span style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, color: COLORS.ink }}>MAISON</span>
+          <span style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, color: COLORS.gold, marginTop: -4 }}>NOVARE</span>
+        </button>
+
+        <nav className="hidden lg:flex items-center gap-7">
+          {links.map(([r, label]) => (
+            <button
+              key={r}
+              onClick={() => go(r)}
+              className="text-xs uppercase tracking-widest font-medium"
+              style={{
+                fontFamily: "Inter",
+                color: route === r || (r === "catalog" && route === "product") ? COLORS.gold : COLORS.inkDim,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="flex items-center gap-4">
+          <button onClick={() => go("admin")} className="hidden md:inline text-[11px] uppercase tracking-widest" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+            Admin
+          </button>
+          <button
+            className="lg:hidden flex flex-col gap-1.5 p-2"
+            onClick={() => setOpen((o) => !o)}
+            aria-label="Menu"
+          >
+            <span style={{ width: 22, height: 2, background: COLORS.ink, display: "block" }} />
+            <span style={{ width: 22, height: 2, background: COLORS.ink, display: "block" }} />
+            <span style={{ width: 14, height: 2, background: COLORS.gold, display: "block" }} />
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="lg:hidden border-t" style={{ borderColor: COLORS.line, background: COLORS.bg }}>
+          <div className="flex flex-col px-5 py-3">
+            {links.map(([r, label]) => (
+              <button
+                key={r}
+                onClick={() => { go(r); setOpen(false); }}
+                className="text-left py-3 text-sm uppercase tracking-widest border-b"
+                style={{ fontFamily: "Inter", color: route === r ? COLORS.gold : COLORS.ink, borderColor: COLORS.line }}
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              onClick={() => { go("admin"); setOpen(false); }}
+              className="text-left py-3 text-sm uppercase tracking-widest"
+              style={{ fontFamily: "Inter", color: COLORS.inkDim }}
+            >
+              Admin
+            </button>
+          </div>
+        </div>
+      )}
+    </header>
+  );
+}
+
+/* ---------------- Hero ---------------- */
+
+function Hero({ go }) {
+  return (
+    <section className="relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${COLORS.bg} 0%, #141416 60%, #0B0B0C 100%)` }}>
+      <div
+        aria-hidden
+        className="absolute inset-0 opacity-40"
+        style={{
+          background: `radial-gradient(circle at 80% 20%, rgba(201,169,97,0.18), transparent 45%), radial-gradient(circle at 10% 90%, rgba(201,169,97,0.10), transparent 40%)`,
+        }}
+      />
+      <div className="max-w-7xl mx-auto px-5 md:px-8 pt-14 pb-16 md:pt-24 md:pb-24 relative grid md:grid-cols-2 gap-10 items-center">
+        <div className="relative z-10">
+          <Eyebrow>Collection permanente</Eyebrow>
+          <h1
+            className="mt-5 leading-[0.95]"
+            style={{ fontFamily: "Anton", fontSize: "clamp(48px, 9vw, 96px)", color: COLORS.ink, letterSpacing: 0.5 }}
+          >
+            MAISON
+            <br />
+            <span style={{ color: COLORS.gold }}>NOVARE</span>
+          </h1>
+          <p className="mt-5 text-base md:text-lg max-w-md" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>
+            Une autre vision du style. Streetwear premium, matières sélectionnées, silhouettes conçues pour durer.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-4">
+            <SolidButton onClick={() => go("catalog")}>Découvrir le catalogue</SolidButton>
+            <GhostButton onClick={() => go("catalog-new")}>Voir les nouveautés</GhostButton>
+          </div>
+        </div>
+
+        <div className="relative h-[380px] md:h-[520px]">
+          <div className="absolute inset-0 grid grid-cols-2 gap-4">
+            <div className="relative rounded-sm overflow-hidden translate-y-6">
+              <img src={img("hero-a", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
+              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,11,12,0.6))" }} />
+            </div>
+            <div className="relative rounded-sm overflow-hidden -translate-y-6">
+              <img src={img("hero-b", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
+              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,11,12,0.6))" }} />
+            </div>
+          </div>
+          <div
+            className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 text-[11px] uppercase tracking-widest font-semibold"
+            style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+          >
+            Édition permanente — NVR
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t" style={{ borderColor: COLORS.line }}>
+        <div className="max-w-7xl mx-auto px-5 md:px-8 py-5 grid grid-cols-3 gap-4 text-center">
+          {[
+            ["Livraison", "Partout en France"],
+            ["Remise en main propre", "Paris & Île-de-France"],
+            ["Service client", "7 jours / 7"],
+          ].map(([t, s]) => (
+            <div key={t}>
+              <div className="text-[11px] md:text-xs uppercase tracking-widest font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{t}</div>
+              <div className="text-[10px] md:text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{s}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Category grid ---------------- */
+
+function CategoryGrid({ go, setCategoryFilter }) {
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-16">
+      <Eyebrow>Univers</Eyebrow>
+      <h2 className="mt-3 mb-8" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>
+        CATÉGORIES
+      </h2>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        {CATEGORIES.map((c, i) => (
+          <button
+            key={c.id}
+            onClick={() => { setCategoryFilter(c.id); go("catalog"); }}
+            className="relative group text-left overflow-hidden rounded-sm"
+            style={{ aspectRatio: "3/4" }}
+          >
+            <img
+              src={img("cat-" + c.id, 500, 650)}
+              alt={c.name}
+              className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+              onError={handleImgError}
+            />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(11,11,12,0.1) 30%, rgba(11,11,12,0.9))" }} />
+            <TagCorner />
+            <div className="absolute top-3 left-3 text-[11px] font-mono" style={{ color: COLORS.gold }}>{c.tag}</div>
+            <div className="absolute bottom-0 p-4">
+              <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink, letterSpacing: 0.5 }}>{c.name.toUpperCase()}</div>
+              <div className="text-[11px] mt-1" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>{c.desc}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Product card ---------------- */
+
+function ProductCard({ product, brand, onOpen }) {
+  return (
+    <button onClick={() => onOpen(product.id)} className="relative text-left group">
+      <div className="relative overflow-hidden rounded-sm" style={{ background: COLORS.surface, aspectRatio: "3/4" }}>
+        <img
+          src={product.images[0]}
+          alt={product.name}
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          onError={handleImgError}
+        />
+        <TagCorner />
+        <div className="absolute top-3 left-3 flex gap-2">
+          {product.isNew && <Badge>Nouveau</Badge>}
+          {product.featured && <Badge tone="dark">En avant</Badge>}
+        </div>
+        {!product.availability && (
+          <div className="absolute inset-x-0 bottom-0 py-1.5 text-center text-[10px] uppercase tracking-widest" style={{ background: "rgba(0,0,0,0.7)", color: COLORS.inkDim, fontFamily: "Inter" }}>
+            Rupture de stock
+          </div>
+        )}
+      </div>
+      <div className="mt-3">
+        <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{brand?.name}</div>
+        <div className="text-sm mt-0.5" style={{ color: COLORS.ink, fontFamily: "Inter", fontWeight: 600 }}>{product.name}</div>
+        <div className="text-[11px] mt-0.5 font-mono" style={{ color: COLORS.inkDim }}>{product.reference}</div>
+      </div>
+    </button>
+  );
+}
+
+/* ---------------- Catalog ---------------- */
+
+function Catalog({ products, brands, initialCategory, forceNew, onOpen, go }) {
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState(initialCategory || "all");
+  const [brand, setBrand] = useState("all");
+  const [size, setSize] = useState("all");
+  const [color, setColor] = useState("all");
+  const [onlyNew, setOnlyNew] = useState(!!forceNew);
+  const [onlyFeatured, setOnlyFeatured] = useState(false);
+  const [sort, setSort] = useState("relevance");
+  const [mobileFilters, setMobileFilters] = useState(false);
+
+  useEffect(() => { setCategory(initialCategory || "all"); }, [initialCategory]);
+  useEffect(() => { setOnlyNew(!!forceNew); }, [forceNew]);
+
+  const allSizes = useMemo(() => Array.from(new Set(products.flatMap((p) => p.sizes))).sort(), [products]);
+  const allColors = useMemo(() => Array.from(new Set(products.flatMap((p) => p.colors))), [products]);
+
+  const filtered = useMemo(() => {
+    let list = products.filter((p) => {
+      if (search && !(`${p.name} ${p.reference}`.toLowerCase().includes(search.toLowerCase()))) return false;
+      if (category !== "all" && p.categoryId !== category) return false;
+      if (brand !== "all" && p.brandId !== brand) return false;
+      if (size !== "all" && !p.sizes.includes(size)) return false;
+      if (color !== "all" && !p.colors.includes(color)) return false;
+      if (onlyNew && !p.isNew) return false;
+      if (onlyFeatured && !p.featured) return false;
+      return true;
+    });
+    if (sort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+    if (sort === "new") list = [...list].sort((a, b) => Number(b.isNew) - Number(a.isNew));
+    return list;
+  }, [products, search, category, brand, size, color, onlyNew, onlyFeatured, sort]);
+
+  const Filters = () => (
+    <div className="space-y-6">
+      <div>
+        <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Catégorie</label>
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle}>
+          <option value="all">Toutes</option>
+          {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Marque</label>
+        <select value={brand} onChange={(e) => setBrand(e.target.value)} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle}>
+          <option value="all">Toutes</option>
+          {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Taille</label>
+        <select value={size} onChange={(e) => setSize(e.target.value)} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle}>
+          <option value="all">Toutes</option>
+          {allSizes.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleur</label>
+        <select value={color} onChange={(e) => setColor(e.target.value)} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle}>
+          <option value="all">Toutes</option>
+          {allColors.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+        <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} />
+        Nouveautés uniquement
+      </label>
+      <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+        <input type="checkbox" checked={onlyFeatured} onChange={(e) => setOnlyFeatured(e.target.checked)} />
+        Mis en avant uniquement
+      </label>
+      <button
+        onClick={() => { setSearch(""); setCategory("all"); setBrand("all"); setSize("all"); setColor("all"); setOnlyNew(false); setOnlyFeatured(false); }}
+        className="text-xs uppercase tracking-widest underline"
+        style={{ color: COLORS.gold, fontFamily: "Inter" }}
+      >
+        Réinitialiser les filtres
+      </button>
+    </div>
+  );
+
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
+      <Eyebrow>Catalogue</Eyebrow>
+      <div className="flex items-end justify-between flex-wrap gap-4 mt-3 mb-8">
+        <h1 style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>TOUT LE CATALOGUE</h1>
+        <div className="flex items-center gap-3 flex-wrap">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher un produit, une référence…"
+            className="px-4 py-2.5 text-sm rounded-sm w-64 max-w-full"
+            style={selectStyle}
+          />
+          <select value={sort} onChange={(e) => setSort(e.target.value)} className="px-3 py-2.5 text-sm rounded-sm" style={selectStyle}>
+            <option value="relevance">Pertinence</option>
+            <option value="name">Nom (A–Z)</option>
+            <option value="new">Nouveautés d'abord</option>
+          </select>
+          <button
+            className="lg:hidden px-4 py-2.5 text-xs uppercase tracking-widest border rounded-sm"
+            style={{ borderColor: COLORS.line, color: COLORS.ink, fontFamily: "Inter" }}
+            onClick={() => setMobileFilters(true)}
+          >
+            Filtres
+          </button>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-[220px_1fr] gap-10">
+        <aside className="hidden lg:block">
+          <Filters />
+        </aside>
+
+        <div>
+          <div className="text-xs mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{filtered.length} produit{filtered.length > 1 ? "s" : ""}</div>
+          {filtered.length === 0 ? (
+            <div className="py-24 text-center border rounded-sm" style={{ borderColor: COLORS.line }}>
+              <div style={{ fontFamily: "Anton", fontSize: 24, color: COLORS.ink }}>AUCUN RÉSULTAT</div>
+              <p className="mt-2 text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Essayez d'élargir vos filtres ou votre recherche.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-5 md:gap-6">
+              {filtered.map((p) => (
+                <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={onOpen} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {mobileFilters && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setMobileFilters(false)} />
+          <div className="absolute right-0 top-0 bottom-0 w-80 max-w-[85vw] p-6 overflow-y-auto" style={{ background: COLORS.surface }}>
+            <div className="flex items-center justify-between mb-6">
+              <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>FILTRES</div>
+              <button onClick={() => setMobileFilters(false)} style={{ color: COLORS.ink }}>✕</button>
+            </div>
+            <Filters />
+            <SolidButton className="w-full mt-6" onClick={() => setMobileFilters(false)}>Voir les résultats</SolidButton>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const selectStyle = {
+  background: COLORS.surface,
+  border: `1px solid ${COLORS.line}`,
+  color: COLORS.ink,
+  fontFamily: "Inter",
+};
+
+/* ---------------- Product page ---------------- */
+
+function ProductPage({ product, brand, products, brands, onOpen, go }) {
+  const [activeImg, setActiveImg] = useState(0);
+  const [selSize, setSelSize] = useState(product.sizes[0] || null);
+  const [selColor, setSelColor] = useState(product.colors[0] || null);
+  const touchStart = useRef(null);
+
+  useEffect(() => { setActiveImg(0); setSelSize(product.sizes[0] || null); setSelColor(product.colors[0] || null); }, [product.id]);
+
+  const similar = products.filter((p) => p.id !== product.id && p.categoryId === product.categoryId).slice(0, 4);
+
+  const onTouchStart = (e) => { touchStart.current = e.touches[0].clientX; };
+  const onTouchEnd = (e) => {
+    if (touchStart.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current;
+    if (dx > 50) setActiveImg((i) => (i - 1 + product.images.length) % product.images.length);
+    if (dx < -50) setActiveImg((i) => (i + 1) % product.images.length);
+    touchStart.current = null;
+  };
+
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
+      <button onClick={() => go("catalog")} className="text-xs uppercase tracking-widest mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        ← Retour au catalogue
+      </button>
+
+      <div className="grid md:grid-cols-2 gap-10">
+        <div>
+          <div
+            className="relative rounded-sm overflow-hidden"
+            style={{ background: COLORS.surface, aspectRatio: "4/5" }}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+          >
+            <img
+              src={product.images[activeImg]}
+              alt={product.name}
+              className="w-full h-full object-cover transition-opacity duration-300"
+              onError={handleImgError}
+            />
+            <TagCorner />
+            <div className="absolute top-3 left-3 flex gap-2">
+              {product.isNew && <Badge>Nouveau</Badge>}
+              {product.featured && <Badge tone="dark">En avant</Badge>}
+            </div>
+          </div>
+          <div className="flex gap-3 mt-4 overflow-x-auto pb-1">
+            {product.images.map((im, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveImg(i)}
+                className="shrink-0 rounded-sm overflow-hidden"
+                style={{ width: 72, height: 90, outline: activeImg === i ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}` }}
+              >
+                <img src={im} alt="" className="w-full h-full object-cover" onError={handleImgError} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{brand?.name}</div>
+          <h1 className="mt-2" style={{ fontFamily: "Anton", fontSize: "clamp(28px,4vw,40px)", color: COLORS.ink }}>{product.name.toUpperCase()}</h1>
+          <div className="mt-2 text-xs font-mono" style={{ color: COLORS.inkDim }}>Réf. {product.reference}</div>
+
+          <p className="mt-5 text-sm leading-relaxed max-w-md" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{product.description}</p>
+
+          {product.colors.length > 0 && (
+            <div className="mt-6">
+              <div className="text-[11px] uppercase tracking-widest mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleur — {selColor}</div>
+              <div className="flex gap-2">
+                {product.colors.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setSelColor(c)}
+                    className="w-8 h-8 rounded-full"
+                    style={{ background: COLOR_SWATCHES[c] || "#444", outline: selColor === c ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}`, outlineOffset: 2 }}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {product.sizes.length > 0 && (
+            <div className="mt-6">
+              <div className="text-[11px] uppercase tracking-widest mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Taille</div>
+              <div className="flex flex-wrap gap-2">
+                {product.sizes.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setSelSize(s)}
+                    className="px-4 py-2 text-sm rounded-sm"
+                    style={{
+                      border: `1px solid ${selSize === s ? COLORS.gold : COLORS.line}`,
+                      color: selSize === s ? COLORS.gold : COLORS.ink,
+                      fontFamily: "Inter",
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 text-sm" style={{ fontFamily: "Inter" }}>
+            {product.availability ? (
+              <span style={{ color: "#7CC49A" }}>● Disponible</span>
+            ) : (
+              <span style={{ color: "#C97C7C" }}>● Rupture de stock</span>
+            )}
+          </div>
+
+          <div className="mt-8 flex flex-wrap gap-4">
+            <SolidButton onClick={() => go("contact")}>Nous contacter pour ce produit</SolidButton>
+            <GhostButton onClick={() => go("catalog")}>Continuer à explorer</GhostButton>
+          </div>
+
+          <div className="mt-8 pt-8 border-t text-sm space-y-1" style={{ borderColor: COLORS.line, fontFamily: "Inter", color: COLORS.inkDim }}>
+            <div>Catégorie : {CATEGORIES.find((c) => c.id === product.categoryId)?.name}</div>
+            <div>Marque : {brand?.name}</div>
+          </div>
+        </div>
+      </div>
+
+      {similar.length > 0 && (
+        <div className="mt-20">
+          <Eyebrow>Vous aimerez aussi</Eyebrow>
+          <h2 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: 28, color: COLORS.ink }}>PRODUITS SIMILAIRES</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+            {similar.map((p) => (
+              <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------------- Brands page ---------------- */
+
+function BrandsPage({ brands, products, onOpenBrand, selectedBrand, onOpen, go }) {
+  if (selectedBrand) {
+    const brand = brands.find((b) => b.id === selectedBrand);
+    const brandProducts = products.filter((p) => p.brandId === selectedBrand);
+    return (
+      <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
+        <button onClick={() => onOpenBrand(null)} className="text-xs uppercase tracking-widest mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+          ← Toutes les marques
+        </button>
+        <Eyebrow>Marque</Eyebrow>
+        <h1 className="mt-3 mb-2" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>{brand.name.toUpperCase()}</h1>
+        <p className="max-w-lg text-sm mb-8" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{brand.description}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+          {brandProducts.map((p) => (
+            <ProductCard key={p.id} product={p} brand={brand} onOpen={onOpen} />
+          ))}
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
+      <Eyebrow>Univers Novare</Eyebrow>
+      <h1 className="mt-3 mb-8" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>MARQUES</h1>
+      <div className="grid md:grid-cols-2 gap-5">
+        {brands.map((b) => {
+          const count = products.filter((p) => p.brandId === b.id).length;
+          return (
+            <button key={b.id} onClick={() => onOpenBrand(b.id)} className="relative text-left p-6 rounded-sm border overflow-hidden group" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+              <TagCorner />
+              <div style={{ fontFamily: "Anton", fontSize: 26, color: COLORS.ink }}>{b.name.toUpperCase()}</div>
+              <p className="text-sm mt-2 max-w-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{b.description}</p>
+              <div className="text-xs mt-4 uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{count} produit{count > 1 ? "s" : ""} →</div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Collections (curated views) ---------------- */
+
+function CollectionsPage({ products, brands, onOpen, go, setCategoryFilter }) {
+  const featured = products.filter((p) => p.featured);
+  const news = products.filter((p) => p.isNew);
+  const groups = [
+    { title: "PIÈCES SIGNATURE", items: featured },
+    { title: "DERNIÈRES ARRIVÉES", items: news },
+  ];
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
+      <Eyebrow>Sélections</Eyebrow>
+      <h1 className="mt-3 mb-10" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>COLLECTIONS</h1>
+      {groups.map((g) => (
+        <div key={g.title} className="mb-14">
+          <h2 className="mb-5" style={{ fontFamily: "Anton", fontSize: 24, color: COLORS.gold }}>{g.title}</h2>
+          {g.items.length === 0 ? (
+            <p className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Aucune pièce pour le moment.</p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+              {g.items.map((p) => (
+                <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={onOpen} />
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/* ---------------- About ---------------- */
+
+function AboutPage({ go }) {
+  return (
+    <section className="max-w-4xl mx-auto px-5 md:px-8 py-16">
+      <Eyebrow>Maison</Eyebrow>
+      <h1 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>À PROPOS</h1>
+      <p className="text-sm leading-relaxed mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        Maison Novare est une plateforme catalogue réunissant plusieurs marques de streetwear premium. Notre rôle : sélectionner, présenter et organiser des pièces vestimentaires, chaussures, sacs, accessoires, casquettes et montres au sein d'une expérience unique.
+      </p>
+      <p className="text-sm leading-relaxed mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        Chaque fiche produit indique clairement sa marque d'origine. Nous ne présentons aucun produit comme partenaire officiel, revendeur agréé ou affilié à une marque sans autorisation vérifiée.
+      </p>
+      <SolidButton onClick={() => go("catalog")}>Explorer le catalogue</SolidButton>
+    </section>
+  );
+}
+
+/* ---------------- Contact ---------------- */
+
+function ContactPage() {
+  const [sent, setSent] = useState(false);
+  const [form, setForm] = useState({ nom: "", prenom: "", email: "", tel: "", sujet: "", message: "" });
+
+  const submit = (e) => {
+    e.preventDefault();
+    setSent(true);
+  };
+
+  return (
+    <section className="max-w-5xl mx-auto px-5 md:px-8 py-16 grid md:grid-cols-[1.2fr_1fr] gap-12">
+      <div>
+        <Eyebrow>Contact</Eyebrow>
+        <h1 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>PARLONS-EN</h1>
+
+        {sent ? (
+          <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.gold, background: COLORS.surface }}>
+            <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.gold }}>MESSAGE ENVOYÉ</div>
+            <p className="text-sm mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nous revenons vers vous rapidement.</p>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="grid sm:grid-cols-2 gap-4">
+            <input required placeholder="Nom" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.nom} onChange={(e) => setForm({ ...form, nom: e.target.value })} />
+            <input required placeholder="Prénom" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.prenom} onChange={(e) => setForm({ ...form, prenom: e.target.value })} />
+            <input required type="email" placeholder="Email" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <input placeholder="Téléphone" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.tel} onChange={(e) => setForm({ ...form, tel: e.target.value })} />
+            <input required placeholder="Sujet" className="px-4 py-3 text-sm rounded-sm sm:col-span-2" style={selectStyle} value={form.sujet} onChange={(e) => setForm({ ...form, sujet: e.target.value })} />
+            <textarea required placeholder="Message" rows={5} className="px-4 py-3 text-sm rounded-sm sm:col-span-2" style={selectStyle} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
+            <div className="sm:col-span-2">
+              <SolidButton className="w-full sm:w-auto">Envoyer</SolidButton>
+            </div>
+          </form>
+        )}
+      </div>
+
+      <div className="space-y-6">
+        <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Réseaux</div>
+          {["Instagram", "TikTok", "Snapchat", "WhatsApp"].map((s) => (
+            <div key={s} className="flex items-center justify-between py-2 border-b last:border-0 text-sm" style={{ borderColor: COLORS.line, fontFamily: "Inter", color: COLORS.ink }}>
+              {s}
+              <span className="text-xs" style={{ color: COLORS.inkDim }}>lien à renseigner</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Service</div>
+          <p className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Livraison partout en France. Remise en main propre disponible sur Paris et Île-de-France. Support 7j/7.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Admin dashboard ---------------- */
+
+function emptyProduct() {
+  return {
+    id: null,
+    name: "",
+    brandId: "",
+    categoryId: "",
+    reference: "",
+    description: "",
+    images: [],
+    sizes: [],
+    colors: [],
+    featured: false,
+    isNew: false,
+    availability: true,
+  };
+}
+
+function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus }) {
+  const [tab, setTab] = useState("products");
+  const [editing, setEditing] = useState(null); // product being edited, or emptyProduct()
+  const [editingBrand, setEditingBrand] = useState(null);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  // -------- upload de photos (remplace l'ancien champ "URL de l'image") --------
+  const fileInputRef = useRef(null);
+  const [uploadStatus, setUploadStatus] = useState(""); // "", "uploading", "done"
+  // debugLog : liste d'entrées { fileName, step, ok, detail } — trace RÉELLE
+  // de chaque étape (sélection/conversion/connexion/upload/url) pour chaque
+  // fichier, avec le message d'erreur exact renvoyé par Supabase le cas échéant.
+  const [debugLog, setDebugLog] = useState([]);
+  const [dragIndex, setDragIndex] = useState(null); // index de la photo en cours de glisser-déposer
+  const [isDraggingOverDrop, setIsDraggingOverDrop] = useState(false); // zone glisser-déposer
+
+  const tabs = [
+    ["products", "Produits"],
+    ["brands", "Marques"],
+    ["categories", "Catégories"],
+  ];
+
+  /* -------- product CRUD -------- */
+  const saveProduct = () => {
+    if (!editing.name || !editing.brandId || !editing.categoryId || !editing.reference) return;
+    if (editing.id) {
+      setProducts((prev) => prev.map((p) => (p.id === editing.id ? editing : p)));
+    } else {
+      setProducts((prev) => [...prev, { ...editing, id: "p" + Date.now() }]);
+    }
+    setEditing(null);
+  };
+  const deleteProduct = (id) => {
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+    setConfirmDelete(null);
+  };
+
+  // -------- Sélection de fichiers depuis l'appareil (photos/pellicule ou dossier) --------
+  // Le tableau editing.images reste un tableau d'URLs (comme avant) : l'ordre du
+  // tableau EST l'ordre d'affichage (sort_order), et images[0] EST la photo
+  // principale (is_primary). Ce mapping garde tout le reste du site (catalogue,
+  // accueil, fiche produit) inchangé, car il lit déjà product.images[0].
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  const handleFilesSelected = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+
+    setUploadStatus("uploading");
+    setDebugLog([]);
+
+    const newUrls = [];
+    const fileLogs = []; // logs accumulés pendant cet appel (setDebugLog est asynchrone)
+
+    await Promise.allSettled(
+      files.map(async (file) => {
+        const fileName = file.name || "(photo sans nom)";
+        const onStep = (step, ok, detail) => {
+          fileLogs.push({ fileName, step, ok, detail });
+          setDebugLog((prev) => [...prev, { fileName, step, ok, detail }]);
+        };
+        try {
+          const uploaded = await uploadToSupabase(file, onStep);
+          newUrls.push(uploaded.publicUrl);
+          // TODO SUPABASE: insérer ici une ligne dans product_images
+          // { product_id: editing.id, image_url: uploaded.publicUrl, sort_order: ..., is_primary: ... }
+          // (l'ID produit définitif n'existe que pour un produit déjà enregistré ;
+          // pour un nouveau produit, cette insertion se fait dans saveProduct
+          // au moment où l'id "p"+Date.now() est généré.)
+        } catch (err) {
+          // L'étape en échec a déjà été tracée par onStep ci-dessus ; on
+          // s'assure ici qu'il existe AU MOINS une entrée d'échec même si
+          // l'erreur est survenue avant le premier trace() (cas improbable).
+          if (!fileLogs.some((l) => l.fileName === fileName && !l.ok)) {
+            const detail = err && err.message ? err.message : String(err);
+            fileLogs.push({ fileName, step: "upload", ok: false, detail });
+            setDebugLog((prev) => [...prev, { fileName, step: "upload", ok: false, detail }]);
+          }
+        }
+      })
+    );
+
+    if (newUrls.length > 0) {
+      setEditing((e) => ({ ...e, images: [...e.images, ...newUrls] }));
+    }
+    setUploadStatus("done");
+  };
+
+  const onFileInputChange = (e) => {
+    handleFilesSelected(e.target.files);
+    e.target.value = ""; // permet de re-sélectionner le(s) même(s) fichier(s) ensuite
+  };
+
+  // -------- Solution de secours : glisser-déposer les photos directement --------
+  const onDropZoneDragOver = (e) => { e.preventDefault(); setIsDraggingOverDrop(true); };
+  const onDropZoneDragLeave = () => setIsDraggingOverDrop(false);
+  const onDropZoneDrop = (e) => {
+    e.preventDefault();
+    setIsDraggingOverDrop(false);
+    handleFilesSelected(e.dataTransfer.files);
+  };
+
+  const removeImage = async (idx) => {
+    const url = editing.images[idx];
+    setEditing((e) => ({ ...e, images: e.images.filter((_, i) => i !== idx) }));
+    // TODO SUPABASE: supprimer aussi la ligne product_images correspondante
+    // (ex: supabase.from('product_images').delete().eq('image_url', url)).
+    await deleteFromSupabase(url);
+  };
+
+  const setPrimaryImage = (idx) => {
+    setEditing((e) => {
+      if (idx === 0) return e;
+      const images = [...e.images];
+      const [chosen] = images.splice(idx, 1);
+      images.unshift(chosen);
+      return { ...e, images };
+    });
+  };
+
+  // -------- Réorganisation par drag-and-drop --------
+  const onImageDragStart = (idx) => setDragIndex(idx);
+  const onImageDragOver = (e) => e.preventDefault();
+  const onImageDrop = (idx) => {
+    setEditing((e) => {
+      if (dragIndex === null || dragIndex === idx) return e;
+      const images = [...e.images];
+      const [moved] = images.splice(dragIndex, 1);
+      images.splice(idx, 0, moved);
+      return { ...e, images };
+    });
+    setDragIndex(null);
+  };
+
+  const toggleListValue = (field, value) => {
+    setEditing((e) => {
+      const list = e[field];
+      return { ...e, [field]: list.includes(value) ? list.filter((v) => v !== value) : [...list, value] };
+    });
+  };
+
+  /* -------- brand CRUD -------- */
+  const saveBrand = () => {
+    if (!editingBrand.name) return;
+    if (editingBrand.id) {
+      setBrands((prev) => prev.map((b) => (b.id === editingBrand.id ? editingBrand : b)));
+    } else {
+      const id = editingBrand.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      setBrands((prev) => [...prev, { ...editingBrand, id }]);
+    }
+    setEditingBrand(null);
+  };
+  const deleteBrand = (id) => setBrands((prev) => prev.filter((b) => b.id !== id));
+
+  /* -------- category CRUD -------- */
+  const saveCategory = () => {
+    if (!editingCategory.name) return;
+    if (editingCategory.id) {
+      setCategories((prev) => prev.map((c) => (c.id === editingCategory.id ? editingCategory : c)));
+    } else {
+      const id = editingCategory.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      setCategories((prev) => [...prev, { ...editingCategory, id, tag: String(prev.length + 1).padStart(2, "0") }]);
+    }
+    setEditingCategory(null);
+  };
+  const deleteCategory = (id) => setCategories((prev) => prev.filter((c) => c.id !== id));
+
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
+      <Eyebrow>Back-office</Eyebrow>
+      <div className="flex items-center gap-3 flex-wrap mt-3 mb-2">
+        <h1 style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,40px)", color: COLORS.ink }}>ADMINISTRATION</h1>
+        {saveStatus && (
+          <span className="text-[11px] uppercase tracking-widest" style={{ color: saveStatus === "erreur" ? "#C97C7C" : COLORS.gold, fontFamily: "Inter" }}>
+            {saveStatus === "enregistrement" ? "Enregistrement…" : saveStatus === "enregistré" ? "✓ Enregistré" : saveStatus === "erreur" ? "⚠ Erreur de sauvegarde" : ""}
+          </span>
+        )}
+      </div>
+      <p className="text-sm mb-8" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        Les modifications sont sauvegardées automatiquement et restent disponibles après actualisation de la page.
+      </p>
+
+      <div className="flex gap-2 mb-8 border-b" style={{ borderColor: COLORS.line }}>
+        {tabs.map(([t, label]) => (
+          <button
+            key={t}
+            onClick={() => { setTab(t); setEditing(null); setEditingBrand(null); setEditingCategory(null); }}
+            className="px-4 py-3 text-xs uppercase tracking-widest font-semibold"
+            style={{ color: tab === t ? COLORS.gold : COLORS.inkDim, borderBottom: tab === t ? `2px solid ${COLORS.gold}` : "2px solid transparent", fontFamily: "Inter" }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* -------- PRODUCTS TAB -------- */}
+      {tab === "products" && !editing && (
+        <div>
+          <SolidButton onClick={() => setEditing(emptyProduct())} className="mb-6">+ Ajouter un produit</SolidButton>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ fontFamily: "Inter" }}>
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-widest" style={{ color: COLORS.inkDim }}>
+                  <th className="py-2 pr-4">Produit</th>
+                  <th className="py-2 pr-4">Marque</th>
+                  <th className="py-2 pr-4">Catégorie</th>
+                  <th className="py-2 pr-4">Réf.</th>
+                  <th className="py-2 pr-4">Statut</th>
+                  <th className="py-2 pr-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {products.map((p) => (
+                  <tr key={p.id} className="border-t" style={{ borderColor: COLORS.line }}>
+                    <td className="py-2 pr-4 flex items-center gap-2">
+                      <img src={p.images[0]} className="w-8 h-10 object-cover rounded-sm" alt="" onError={handleImgError} />
+                      {p.name}
+                    </td>
+                    <td className="py-2 pr-4" style={{ color: COLORS.inkDim }}>{brands.find((b) => b.id === p.brandId)?.name || "—"}</td>
+                    <td className="py-2 pr-4" style={{ color: COLORS.inkDim }}>{categories.find((c) => c.id === p.categoryId)?.name || "—"}</td>
+                    <td className="py-2 pr-4 font-mono text-xs" style={{ color: COLORS.inkDim }}>{p.reference}</td>
+                    <td className="py-2 pr-4">
+                      <div className="flex gap-1 flex-wrap">
+                        {p.isNew && <Badge>Nouveau</Badge>}
+                        {p.featured && <Badge tone="dark">En avant</Badge>}
+                        {!p.availability && <Badge tone="dark">Rupture</Badge>}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-4">
+                      <div className="flex gap-3">
+                        <button onClick={() => setEditing(p)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
+                        <button onClick={() => setConfirmDelete(p.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "products" && editing && (
+        <div className="max-w-3xl">
+          <div className="flex items-center justify-between mb-6">
+            <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink }}>{editing.id ? "MODIFIER LE PRODUIT" : "NOUVEAU PRODUIT"}</div>
+            <button onClick={() => setEditing(null)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Annuler</button>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nom du produit</label>
+              <input className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Référence</label>
+              <input className="w-full px-3 py-2 text-sm rounded-sm font-mono" style={selectStyle} value={editing.reference} onChange={(e) => setEditing({ ...editing, reference: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Marque</label>
+              <select className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle} value={editing.brandId} onChange={(e) => setEditing({ ...editing, brandId: e.target.value })}>
+                <option value="">— Choisir —</option>
+                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Catégorie</label>
+              <select className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle} value={editing.categoryId} onChange={(e) => setEditing({ ...editing, categoryId: e.target.value })}>
+                <option value="">— Choisir —</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Description</label>
+              <textarea rows={3} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                Photos ({editing.images.length})
+              </label>
+
+              {editing.images.length > 0 && (
+                <>
+                  <div className="flex flex-wrap gap-3 mb-3">
+                    {editing.images.map((im, i) => (
+                      <div
+                        key={im + i}
+                        className="relative"
+                        draggable
+                        onDragStart={() => onImageDragStart(i)}
+                        onDragOver={onImageDragOver}
+                        onDrop={() => onImageDrop(i)}
+                        style={{ cursor: "grab", opacity: dragIndex === i ? 0.4 : 1 }}
+                        title="Glisser pour réorganiser"
+                      >
+                        <img src={im} className="w-16 h-20 object-cover rounded-sm" alt="" onError={handleImgError} style={{ border: i === 0 ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}` }} />
+                        <button
+                          onClick={() => removeImage(i)}
+                          className="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs"
+                          style={{ background: "#C97C7C", color: "#0B0B0C" }}
+                          title="Supprimer la photo"
+                        >
+                          ✕
+                        </button>
+                        {i === 0 ? (
+                          <span
+                            className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-[9px] uppercase tracking-widest font-semibold rounded-sm whitespace-nowrap"
+                            style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+                          >
+                            ★ Principale
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setPrimaryImage(i)}
+                            className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-[9px] uppercase tracking-widest rounded-sm whitespace-nowrap"
+                            style={{ background: COLORS.surface2, color: COLORS.inkDim, border: `1px solid ${COLORS.line}`, fontFamily: "Inter" }}
+                            title="Définir comme photo principale"
+                          >
+                            Définir principale
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                    Glissez-déposez les photos pour changer leur ordre. La photo entourée en champagne est la photo principale.
+                  </p>
+                </>
+              )}
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={FILE_INPUT_ACCEPT}
+                multiple
+                className="hidden"
+                onChange={onFileInputChange}
+              />
+
+              {/* Solution de secours : glisser-déposer directement des fichiers,
+                  en plus du bouton de sélection (fonctionne aussi sur mobile
+                  si le navigateur le permet, mais surtout utile sur ordinateur). */}
+              <div
+                onDragOver={onDropZoneDragOver}
+                onDragLeave={onDropZoneDragLeave}
+                onDrop={onDropZoneDrop}
+                onClick={openFilePicker}
+                className="flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-sm text-center cursor-pointer transition-colors"
+                style={{
+                  border: `2px dashed ${isDraggingOverDrop ? COLORS.gold : COLORS.line}`,
+                  background: isDraggingOverDrop ? COLORS.surface2 : "transparent",
+                }}
+              >
+                <span style={{ fontSize: 22 }}>📷</span>
+                <span className="text-sm font-semibold" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+                  Glissez-déposez vos photos ici
+                </span>
+                <span className="text-xs" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>
+                  ou cliquez pour choisir depuis mon téléphone / ordinateur
+                </span>
+              </div>
+              <div className="mt-3">
+                <GhostButton onClick={openFilePicker}>📷 Choisir depuis mon téléphone</GhostButton>
+              </div>
+
+              {uploadStatus === "uploading" && (
+                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
+                  Import des photos en cours…
+                </div>
+              )}
+              {uploadStatus === "done" && debugLog.every((l) => l.ok) && debugLog.length > 0 && (
+                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
+                  Photos ajoutées ✓
+                </div>
+              )}
+
+              {/* -------- Panneau de debug réel -------- */}
+              {/* Trace chaque étape (sélection / conversion / connexion / upload / url)
+                  pour chaque fichier, avec le message d'erreur EXACT renvoyé par
+                  Supabase en cas d'échec — jamais un message générique. */}
+              {debugLog.length > 0 && (
+                <div className="mt-3 rounded-sm overflow-hidden" style={{ border: `1px solid ${COLORS.line}` }}>
+                  <div className="px-3 py-2 text-[10px] uppercase tracking-widest" style={{ background: COLORS.surface2, color: COLORS.inkDim, fontFamily: "Inter" }}>
+                    Journal d'import
+                  </div>
+                  <div className="max-h-56 overflow-y-auto">
+                    {Object.entries(
+                      debugLog.reduce((acc, l) => {
+                        (acc[l.fileName] = acc[l.fileName] || []).push(l);
+                        return acc;
+                      }, {})
+                    ).map(([fileName, entries]) => (
+                      <div key={fileName} className="px-3 py-2 border-t" style={{ borderColor: COLORS.line }}>
+                        <div className="text-xs font-semibold mb-1" style={{ fontFamily: "Inter", color: COLORS.ink }}>{fileName}</div>
+                        {entries.map((l, idx) => (
+                          <div key={idx} className="text-[11px] flex items-start gap-1.5" style={{ fontFamily: "Inter", color: l.ok ? COLORS.inkDim : "#C97C7C" }}>
+                            <span>{l.ok ? "✅" : "❌"}</span>
+                            <span>
+                              <strong>{STEP_LABELS[l.step] || l.step}</strong>
+                              {l.detail ? ` — ${l.detail}` : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[11px] mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                Formats acceptés : JPG, JPEG, PNG, WEBP, HEIC, HEIF (photos iPhone). Les photos HEIC sont converties automatiquement en JPEG. Vous pouvez sélectionner plusieurs photos à la fois — un fichier n'est jamais refusé uniquement à cause de son type déclaré par le téléphone.
+              </p>
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Tailles</label>
+              <div className="flex flex-wrap gap-2">
+                {["Unique", "38", "39", "40", "41", "42", "43", "44", "45", "XS", "S", "M", "L", "XL"].map((s) => (
+                  <button key={s} type="button" onClick={() => toggleListValue("sizes", s)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.sizes.includes(s) ? COLORS.gold : COLORS.line}`, color: editing.sizes.includes(s) ? COLORS.gold : COLORS.ink }}>{s}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleurs</label>
+              <div className="flex flex-wrap gap-2">
+                {Object.keys(COLOR_SWATCHES).map((c) => (
+                  <button key={c} type="button" onClick={() => toggleListValue("colors", c)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.colors.includes(c) ? COLORS.gold : COLORS.line}`, color: editing.colors.includes(c) ? COLORS.gold : COLORS.ink }}>{c}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="sm:col-span-2 flex flex-wrap gap-6 pt-2">
+              <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+                <input type="checkbox" checked={editing.featured} onChange={(e) => setEditing({ ...editing, featured: e.target.checked })} /> Mettre en avant
+              </label>
+              <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+                <input type="checkbox" checked={editing.isNew} onChange={(e) => setEditing({ ...editing, isNew: e.target.checked })} /> Marquer comme nouveauté
+              </label>
+              <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+                <input type="checkbox" checked={editing.availability} onChange={(e) => setEditing({ ...editing, availability: e.target.checked })} /> Disponible
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-8 flex gap-3">
+            <SolidButton onClick={saveProduct}>Enregistrer le produit</SolidButton>
+            <GhostButton onClick={() => setEditing(null)}>Annuler</GhostButton>
+          </div>
+        </div>
+      )}
+
+      {/* -------- BRANDS TAB -------- */}
+      {tab === "brands" && !editingBrand && (
+        <div>
+          <SolidButton onClick={() => setEditingBrand({ id: null, name: "", description: "" })} className="mb-6">+ Ajouter une marque</SolidButton>
+          <div className="grid sm:grid-cols-2 gap-4">
+            {brands.map((b) => (
+              <div key={b.id} className="p-4 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+                <div style={{ fontFamily: "Inter", fontWeight: 700, color: COLORS.ink }}>{b.name}</div>
+                <p className="text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{b.description}</p>
+                <div className="text-xs mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{products.filter((p) => p.brandId === b.id).length} produit(s)</div>
+                <div className="flex gap-3 mt-3">
+                  <button onClick={() => setEditingBrand(b)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
+                  <button onClick={() => deleteBrand(b.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "brands" && editingBrand && (
+        <div className="max-w-md">
+          <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink, marginBottom: 16 }}>{editingBrand.id ? "MODIFIER LA MARQUE" : "NOUVELLE MARQUE"}</div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nom</label>
+          <input className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingBrand.name} onChange={(e) => setEditingBrand({ ...editingBrand, name: e.target.value })} />
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Description</label>
+          <textarea rows={3} className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingBrand.description} onChange={(e) => setEditingBrand({ ...editingBrand, description: e.target.value })} />
+          <div className="flex gap-3">
+            <SolidButton onClick={saveBrand}>Enregistrer</SolidButton>
+            <GhostButton onClick={() => setEditingBrand(null)}>Annuler</GhostButton>
+          </div>
+        </div>
+      )}
+
+      {/* -------- CATEGORIES TAB -------- */}
+      {tab === "categories" && !editingCategory && (
+        <div>
+          <SolidButton onClick={() => setEditingCategory({ id: null, name: "", desc: "" })} className="mb-6">+ Ajouter une catégorie</SolidButton>
+          <div className="grid sm:grid-cols-2 gap-4">
+            {categories.map((c) => (
+              <div key={c.id} className="p-4 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+                <div style={{ fontFamily: "Inter", fontWeight: 700, color: COLORS.ink }}>{c.name}</div>
+                <p className="text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{c.desc}</p>
+                <div className="text-xs mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{products.filter((p) => p.categoryId === c.id).length} produit(s)</div>
+                <div className="flex gap-3 mt-3">
+                  <button onClick={() => setEditingCategory(c)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
+                  <button onClick={() => deleteCategory(c.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "categories" && editingCategory && (
+        <div className="max-w-md">
+          <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink, marginBottom: 16 }}>{editingCategory.id ? "MODIFIER LA CATÉGORIE" : "NOUVELLE CATÉGORIE"}</div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nom</label>
+          <input className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingCategory.name} onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })} />
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Courte description</label>
+          <input className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingCategory.desc} onChange={(e) => setEditingCategory({ ...editingCategory, desc: e.target.value })} />
+          <div className="flex gap-3">
+            <SolidButton onClick={saveCategory}>Enregistrer</SolidButton>
+            <GhostButton onClick={() => setEditingCategory(null)}>Annuler</GhostButton>
+          </div>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(0,0,0,0.7)" }}>
+          <div className="max-w-sm w-full p-6 rounded-sm" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+            <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>SUPPRIMER CE PRODUIT ?</div>
+            <p className="text-sm mt-2 mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Cette action est irréversible pour cette session.</p>
+            <div className="flex gap-3">
+              <SolidButton onClick={() => deleteProduct(confirmDelete)}>Supprimer</SolidButton>
+              <GhostButton onClick={() => setConfirmDelete(null)}>Annuler</GhostButton>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------------- Footer ---------------- */
+
+function Footer({ go }) {
+  return (
+    <footer className="border-t mt-10" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+      <div className="max-w-7xl mx-auto px-5 md:px-8 py-12 grid sm:grid-cols-2 md:grid-cols-4 gap-8">
+        <div>
+          <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>MAISON <span style={{ color: COLORS.gold }}>NOVARE</span></div>
+          <p className="text-xs mt-3 max-w-xs" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Plateforme catalogue streetwear premium — sélection multi-marques, service dédié.</p>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Navigation</div>
+          {[["home","Accueil"],["catalog","Catalogue"],["catalog-new","Nouveautés"],["collections","Collections"],["contact","Contact"]].map(([r,l]) => (
+            <button key={r} onClick={() => go(r)} className="block text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{l}</button>
+          ))}
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Catégories</div>
+          {CATEGORIES.map((c) => (
+            <div key={c.id} className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{c.name}</div>
+          ))}
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Service</div>
+          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Livraison France entière</div>
+          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Remise en main propre — Paris/IDF</div>
+          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Support 7j/7</div>
+        </div>
+      </div>
+      <div className="border-t py-5 text-center text-[11px]" style={{ borderColor: COLORS.line, color: COLORS.inkDim, fontFamily: "Inter" }}>
+        © 2026 Maison Novare — Tous droits réservés
+      </div>
+    </footer>
+  );
+}
+
+/* ---------------- App root ---------------- */
+
+const STORAGE_KEY = "maison-novare-catalog-data";
+
+export default function App() {
+  const [route, setRoute] = useState("home");
+  const [products, setProducts] = useState(INITIAL_PRODUCTS);
+  const [brands, setBrands] = useState(BRANDS);
+  const [categories, setCategories] = useState(CATEGORIES);
+  const [selectedProductId, setSelectedProductId] = useState(null);
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [selectedBrandId, setSelectedBrandId] = useState(null);
+
+  const [loaded, setLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(""); // "", "enregistrement", "enregistré", "erreur"
+
+  // Load any previously saved catalog data once, on first mount.
+  // This is what makes admin edits (including added image URLs) survive a page refresh.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.products)) setProducts(data.products);
+        if (Array.isArray(data.brands)) setBrands(data.brands);
+        if (Array.isArray(data.categories)) setCategories(data.categories);
+      }
+    } catch (err) {
+      // No saved data yet (first visit) — keep the built-in demo catalog.
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  // Persist products/brands/categories any time they change, once initial load is done.
+  useEffect(() => {
+    if (!loaded) return;
+    setSaveStatus("enregistrement");
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ products, brands, categories }));
+      setSaveStatus("enregistré");
+    } catch (err) {
+      setSaveStatus("erreur");
+    }
+  }, [products, brands, categories, loaded]);
+
+  const go = (r) => {
+    setRoute(r);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const openProduct = (id) => {
+    setSelectedProductId(id);
+    setRoute("product");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const selectedBrand = selectedProduct ? brands.find((b) => b.id === selectedProduct.brandId) : null;
+
+  return (
+    <div style={{ background: COLORS.bg, minHeight: "100vh" }}>
+      <style>{FONT_IMPORT}{`
+        * { box-sizing: border-box; }
+        body { margin: 0; }
+        select, input, textarea { outline: none; }
+        select:focus, input:focus, textarea:focus { outline: 2px solid ${COLORS.gold}; outline-offset: 1px; }
+        button:focus-visible, a:focus-visible { outline: 2px solid ${COLORS.gold}; outline-offset: 2px; }
+        ::selection { background: ${COLORS.gold}; color: #0B0B0C; }
+      `}</style>
+
+      <Header route={route} go={go} />
+
+      {route === "home" && (
+        <>
+          <Hero go={go} />
+          <CategoryGrid go={go} setCategoryFilter={setCategoryFilter} />
+          <section className="max-w-7xl mx-auto px-5 md:px-8 pb-16">
+            <div className="flex items-end justify-between mb-6">
+              <div>
+                <Eyebrow>Nouveautés</Eyebrow>
+                <h2 className="mt-3" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>DERNIÈRES ARRIVÉES</h2>
+              </div>
+              <GhostButton onClick={() => go("catalog-new")}>Voir tout</GhostButton>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+              {products.filter((p) => p.isNew).slice(0, 4).map((p) => (
+                <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={openProduct} />
+              ))}
+            </div>
+          </section>
+          <section className="max-w-7xl mx-auto px-5 md:px-8 pb-20">
+            <div className="flex items-end justify-between mb-6">
+              <div>
+                <Eyebrow>Sélection</Eyebrow>
+                <h2 className="mt-3" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>PIÈCES SIGNATURE</h2>
+              </div>
+              <GhostButton onClick={() => go("collections")}>Voir tout</GhostButton>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+              {products.filter((p) => p.featured).slice(0, 4).map((p) => (
+                <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={openProduct} />
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+
+      {route === "catalog" && (
+        <Catalog products={products} brands={brands} initialCategory={categoryFilter} forceNew={false} onOpen={openProduct} go={go} />
+      )}
+      {route === "catalog-new" && (
+        <Catalog products={products} brands={brands} initialCategory="all" forceNew={true} onOpen={openProduct} go={go} />
+      )}
+
+      {route === "product" && selectedProduct && (
+        <ProductPage product={selectedProduct} brand={selectedBrand} products={products} brands={brands} onOpen={openProduct} go={go} />
+      )}
+
+      {route === "brands" && (
+        <BrandsPage brands={brands} products={products} onOpenBrand={setSelectedBrandId} selectedBrand={selectedBrandId} onOpen={openProduct} go={go} />
+      )}
+
+      {route === "collections" && (
+        <CollectionsPage products={products} brands={brands} onOpen={openProduct} go={go} setCategoryFilter={setCategoryFilter} />
+      )}
+
+      {route === "about" && <AboutPage go={go} />}
+
+      {route === "contact" && <ContactPage />}
+
+      {route === "admin" && (
+        <AdminDashboard
+          products={products} setProducts={setProducts}
+          brands={brands} setBrands={setBrands}
+          categories={categories} setCategories={setCategories}
+          saveStatus={saveStatus}
+        />
+      )}
+
+      <Footer go={go} />
+    </div>
+  );
+}
