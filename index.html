@@ -1,441 +1,1309 @@
-"use client"
+import React, { useState, useMemo, useRef, useEffect } from "react";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react"
-import { AnimatePresence, motion } from "framer-motion"
+/* ============================================================
+   MAISON NOVARE — plateforme catalogue premium
+   Palette : noir #0B0B0C / blanc cassé #F3F1EA / champagne #C9A961
+             graphite #17171A / bronze #7A6A48
+   Display : "Anton" (titres XXL) — Body : "Inter" — Mono : "IBM Plex Mono" (référence produit)
+   Signature : étiquette diagonale "tag de vêtement" utilisée comme motif structurel
+   ============================================================ */
 
-// ─── Token System ───────────────────────────────────────────────────────────
-// Palette : #050505 noir abyssal · #C9A84C or royal · #D4B45F or clair ·
-//           #E7C87A or doux · #1a1510 brun nuit · rgba(201,168,76,0.12) voile
-// Type    : Cormorant Garamond (display majestueux) · Jost (corps lisible)
-// Layout  : 2 col desktop img‑gauche | contenu‑droite ; mobile empilé
-// Signature : filet doré animé qui « révèle » les notes olfactives
+const FONT_IMPORT = `
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+`;
 
-// ─── Data ───────────────────────────────────────────────────────────────────
-const perfumes = [
-  {
-    id: "musc-royal",
-    nav: "Origine",
-    title: "Musc Royal",
-    subtitle: "La Fragrance Fondatrice",
+const COLORS = {
+  bg: "#0B0B0C",
+  surface: "#17171A",
+  surface2: "#1F1F23",
+  line: "#2B2B30",
+  ink: "#F3F1EA",
+  inkDim: "#A9A69C",
+  gold: "#C9A961",
+  goldDim: "#8C7A54",
+};
+
+/* ---------------- Demo data (fictitious brands, placeholder imagery) ---------------- */
+
+const CATEGORIES = [
+  { id: "chaussures", name: "Chaussures", tag: "01", desc: "Sneakers & silhouettes signature" },
+  { id: "vetements", name: "Vêtements", tag: "02", desc: "Prêt-à-porter urbain premium" },
+  { id: "sacs", name: "Sacs", tag: "03", desc: "Maroquinerie & pièces du quotidien" },
+  { id: "accessoires", name: "Accessoires", tag: "04", desc: "Détails qui font la différence" },
+  { id: "casquettes", name: "Casquettes", tag: "05", desc: "Headwear signature" },
+  { id: "montres", name: "Montres", tag: "06", desc: "Horlogerie contemporaine" },
+];
+
+const BRANDS = [
+  { id: "novare-originals", name: "Novare Originals", description: "La ligne cœur de Maison Novare — silhouettes signature et pièces intemporelles." },
+  { id: "atelier-noir", name: "Atelier Noir", description: "Façon artisanale, teintes profondes, coupes précises." },
+  { id: "urban-forge", name: "Urban Forge", description: "Streetwear technique pensé pour la ville." },
+  { id: "blackout-lab", name: "Blackout Lab", description: "Recherche matière et éditions limitées." },
+  { id: "gilt-co", name: "Gilt & Co", description: "Horlogerie et bijouterie contemporaine." },
+  { id: "velour-house", name: "Velour House", description: "Maroquinerie douce, finitions haut de gamme." },
+];
+
+const COLOR_SWATCHES = {
+  "Noir": "#111113",
+  "Champagne": "#C9A961",
+  "Blanc Cassé": "#EDE9DF",
+  "Gris Ardoise": "#5C5C63",
+  "Bordeaux": "#5C2430",
+  "Kaki": "#5A5842",
+};
+
+const img = (seed, w = 900, h = 1100) => `https://picsum.photos/seed/${seed}/${w}/${h}`;
+
+function makeProduct(id, name, brandId, categoryId, ref, seedBase, opts = {}) {
+  const nPhotos = opts.photos || 4;
+  return {
+    id,
+    name,
+    brandId,
+    categoryId,
+    reference: ref,
     description:
-      "Une fragrance majestueuse née de l'alliance du musc blanc, de la vanille orientale et des bois précieux. Une œuvre olfactive qui célèbre l'art du parfumeur marocain.",
-    notes: {
-      tete: ["Bergamote", "Fleur d'oranger"],
-      coeur: ["Musc blanc", "Jasmin"],
-      fond: ["Vanille", "Bois de santal", "Ambre"],
-    },
-    image:
-      "https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?q=90&w=1200&auto=format&fit=crop",
-    accent: "#C9A84C",
-  },
-  {
-    id: "oud-imperial",
-    nav: "Oud",
-    title: "Oud Impérial",
-    subtitle: "Le Noir des Palais",
-    description:
-      "Un parfum puissant et mystérieux inspiré des palais orientaux. L'oud noble, roi des bois précieux, s'exprime avec une majesté rare.",
-    notes: {
-      tete: ["Safran", "Cardamome"],
-      coeur: ["Oud noble", "Rose de Damas"],
-      fond: ["Patchouli", "Ambre noir"],
-    },
-    image:
-      "https://images.unsplash.com/photo-1541643600914-78b084683702?q=90&w=1200&auto=format&fit=crop",
-    accent: "#D4B45F",
-  },
-  {
-    id: "ambre-prestige",
-    nav: "Ambre",
-    title: "Ambre Prestige",
-    subtitle: "Le Sillage Éternel",
-    description:
-      "Une senteur chaleureuse et raffinée laissant un sillage inoubliable. L'ambre déploie ses facettes les plus précieuses dans une composition d'exception.",
-    notes: {
-      tete: ["Mandarine", "Poivre rose"],
-      coeur: ["Ambre", "Fève tonka"],
-      fond: ["Vanille", "Musc"],
-    },
-    image:
-      "https://images.unsplash.com/photo-1615634260167-c8cdede054de?q=90&w=1200&auto=format&fit=crop",
-    accent: "#E7C87A",
-  },
-  {
-    id: "rose-royale",
-    nav: "Rose",
-    title: "Rose Royale",
-    subtitle: "La Délicatesse Absolue",
-    description:
-      "La délicatesse florale sublimée par l'élégance orientale. La rose de Damas, cueillie à l'aube, transcende chaque note dans une symphonie de pureté.",
-    notes: {
-      tete: ["Litchi", "Framboise"],
-      coeur: ["Rose de Damas", "Pivoine"],
-      fond: ["Musc blanc", "Bois de cachemire"],
-    },
-    image:
-      "https://images.unsplash.com/photo-1563170351-be82bc888aa4?q=90&w=1200&auto=format&fit=crop",
-    accent: "#C9A84C",
-  },
-]
-
-// ─── Hook : auto-cycle ───────────────────────────────────────────────────────
-function useCycle(total = 4, interval = 6000) {
-  const [current, setCurrent] = useState(0)
-  const timerRef = useRef(null)
-
-  const go = useCallback(
-    (idx) => {
-      clearTimeout(timerRef.current)
-      setCurrent(idx % total)
-    },
-    [total]
-  )
-
-  useEffect(() => {
-    timerRef.current = setTimeout(() => {
-      setCurrent((p) => (p + 1) % total)
-    }, interval)
-    return () => clearTimeout(timerRef.current)
-  }, [current, total, interval])
-
-  return { current, go }
+      opts.description ||
+      "Pièce signature Maison Novare pensée pour l'usage quotidien : matières sélectionnées, finitions soignées, coupe étudiée pour durer.",
+    images: Array.from({ length: nPhotos }, (_, i) => img(`${seedBase}-${i}`)),
+    sizes: opts.sizes || ["XS", "S", "M", "L", "XL"],
+    colors: opts.colors || ["Noir", "Champagne"],
+    featured: !!opts.featured,
+    isNew: !!opts.isNew,
+    availability: opts.availability ?? true,
+    price: opts.price || null,
+  };
 }
 
-// ─── NoteGroup ───────────────────────────────────────────────────────────────
-function NoteGroup({ label, notes, delay = 0 }) {
+const INITIAL_PRODUCTS = [
+  makeProduct("p1", "Sneaker Silhouette 01", "novare-originals", "chaussures", "NVR-SN-001", "sneak1", { featured: true, isNew: true, sizes: ["39","40","41","42","43","44"], colors: ["Noir","Blanc Cassé"], photos: 5 }),
+  makeProduct("p2", "Sneaker Trail Forge", "urban-forge", "chaussures", "UFG-SN-014", "sneak2", { isNew: true, sizes: ["40","41","42","43","44","45"], colors: ["Kaki","Noir"] }),
+  makeProduct("p3", "Boot Atelier Cuir", "atelier-noir", "chaussures", "ATN-BT-007", "sneak3", { colors: ["Noir","Bordeaux"], sizes: ["40","41","42","43","44"] }),
+  makeProduct("p4", "Doudoune Shine", "novare-originals", "vetements", "NVR-DD-021", "coat1", { featured: true, colors: ["Noir","Champagne"] }),
+  makeProduct("p5", "Ensemble Monogramme Studio", "blackout-lab", "vetements", "BOL-EN-009", "hoodie1", { isNew: true, colors: ["Champagne","Gris Ardoise"] }),
+  makeProduct("p6", "Veste Technique Forge", "urban-forge", "vetements", "UFG-VT-033", "jacket1", { colors: ["Noir","Kaki"] }),
+  makeProduct("p7", "Pull Col Rond Atelier", "atelier-noir", "vetements", "ATN-PL-012", "sweater1", { colors: ["Gris Ardoise","Noir"] }),
+  makeProduct("p8", "Sac Crossbody Signature", "velour-house", "sacs", "VLH-SC-005", "bag1", { featured: true, sizes: [], colors: ["Noir","Bordeaux"], photos: 5 }),
+  makeProduct("p9", "Sac Weekend Forge", "urban-forge", "sacs", "UFG-SC-019", "bag2", { isNew: true, sizes: [], colors: ["Noir","Kaki"] }),
+  makeProduct("p10", "Pochette Studio", "blackout-lab", "sacs", "BOL-SC-041", "bag3", { sizes: [], colors: ["Champagne","Noir"] }),
+  makeProduct("p11", "Ceinture Cuir Grainé", "atelier-noir", "accessoires", "ATN-CE-002", "acc1", { sizes: ["S","M","L"], colors: ["Noir","Bordeaux"] }),
+  makeProduct("p12", "Foulard Monogramme", "novare-originals", "accessoires", "NVR-FL-010", "acc2", { sizes: [], colors: ["Champagne","Gris Ardoise"], isNew: true }),
+  makeProduct("p13", "Casquette Icône Gold", "novare-originals", "casquettes", "NVR-CQ-006", "cap1", { featured: true, sizes: ["Unique"], colors: ["Noir","Champagne"] }),
+  makeProduct("p14", "Casquette Forge Tech", "urban-forge", "casquettes", "UFG-CQ-023", "cap2", { sizes: ["Unique"], colors: ["Kaki","Noir"] }),
+  makeProduct("p15", "Montre Automatique Royale", "gilt-co", "montres", "GLC-MT-101", "watch1", { featured: true, sizes: [], colors: ["Noir","Champagne"], photos: 5 }),
+  makeProduct("p16", "Montre Chrono All-Black", "gilt-co", "montres", "GLC-MT-118", "watch2", { isNew: true, sizes: [], colors: ["Noir"] }),
+  makeProduct("p17", "Sneaker Studio Low", "blackout-lab", "chaussures", "BOL-SN-027", "sneak4", { sizes: ["38","39","40","41","42"], colors: ["Blanc Cassé","Champagne"] }),
+  makeProduct("p18", "Sac Banane Signature", "novare-originals", "sacs", "NVR-SC-030", "bag4", { sizes: [], colors: ["Noir","Champagne"] }),
+];
+
+/* ---------------- small UI atoms ---------------- */
+
+function Eyebrow({ children }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay }}
-      className="space-y-1.5"
+    <div
+      className="inline-flex items-center gap-2 text-xs tracking-widest uppercase font-medium"
+      style={{ color: COLORS.gold, fontFamily: "Inter" }}
     >
-      <p
-        style={{ color: "#C9A84C", fontFamily: "'Jost', sans-serif" }}
-        className="text-[10px] font-semibold uppercase tracking-[0.2em] opacity-80"
-      >
-        {label}
-      </p>
-      <div className="flex flex-wrap gap-1.5">
-        {notes.map((n) => (
-          <span
-            key={n}
-            style={{
-              border: "1px solid rgba(201,168,76,0.3)",
-              color: "#D4B45F",
-              fontFamily: "'Jost', sans-serif",
-              background: "rgba(201,168,76,0.06)",
-            }}
-            className="rounded-full px-2.5 py-0.5 text-xs tracking-wide"
-          >
-            {n}
-          </span>
-        ))}
-      </div>
-    </motion.div>
-  )
+      <span style={{ width: 18, height: 1, background: COLORS.gold, display: "inline-block" }} />
+      {children}
+    </div>
+  );
 }
 
-// ─── GoldDivider ─────────────────────────────────────────────────────────────
-function GoldDivider({ delay = 0 }) {
+function TagCorner() {
+  // signature "clothing tag" motif — diagonal cut corner used across cards
   return (
-    <motion.div
-      initial={{ scaleX: 0, opacity: 0 }}
-      animate={{ scaleX: 1, opacity: 1 }}
-      transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay }}
+    <div
+      aria-hidden
       style={{
-        background:
-          "linear-gradient(90deg, transparent, #C9A84C 30%, #E7C87A 60%, transparent)",
-        height: "1px",
-        originX: 0,
+        position: "absolute",
+        top: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+        borderStyle: "solid",
+        borderWidth: "0 34px 34px 0",
+        borderColor: `transparent ${COLORS.gold} transparent transparent`,
       }}
-      className="w-full my-4"
     />
-  )
+  );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-export default function MuscRoyalCarousel() {
-  const { current, go } = useCycle(perfumes.length, 6000)
-  const p = perfumes[current]
-
+function Badge({ children, tone = "gold" }) {
+  const bg = tone === "gold" ? COLORS.gold : COLORS.surface2;
+  const color = tone === "gold" ? "#0B0B0C" : COLORS.ink;
   return (
-    <>
-      {/* Google Fonts */}
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Jost:wght@300;400;500&display=swap');
+    <span
+      className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest rounded-sm"
+      style={{ background: bg, color, fontFamily: "Inter" }}
+    >
+      {children}
+    </span>
+  );
+}
 
-        .perf-card::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          border-radius: inherit;
-          padding: 1px;
-          background: linear-gradient(135deg, rgba(201,168,76,0.5), rgba(201,168,76,0.05) 40%, rgba(201,168,76,0.2) 80%, rgba(201,168,76,0.4));
-          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-          -webkit-mask-composite: xor;
-          mask-composite: exclude;
-          pointer-events: none;
-        }
+function GhostButton({ children, onClick, className = "" }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-6 py-3 text-sm uppercase tracking-widest font-semibold border transition-colors ${className}`}
+      style={{ borderColor: COLORS.gold, color: COLORS.ink, fontFamily: "Inter" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.gold, e.currentTarget.style.color = "#0B0B0C")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent", e.currentTarget.style.color = COLORS.ink)}
+    >
+      {children}
+    </button>
+  );
+}
 
-        .nav-pill {
-          transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-        }
-        .nav-pill:hover {
-          background: rgba(201,168,76,0.15) !important;
-        }
+function SolidButton({ children, onClick, className = "" }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-6 py-3 text-sm uppercase tracking-widest font-semibold transition-transform active:scale-95 ${className}`}
+      style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+    >
+      {children}
+    </button>
+  );
+}
 
-        .img-wrapper img {
-          transition: transform 7s ease;
-        }
-        .img-wrapper:hover img {
-          transform: scale(1.04);
-        }
-      `}</style>
+/* ---------------- Header ---------------- */
 
-      <div
-        style={{ background: "#050505", fontFamily: "'Jost', sans-serif" }}
-        className="w-full min-h-screen flex flex-col items-center justify-center py-16 px-4"
-      >
-        {/* Brand header */}
-        <motion.div
-          initial={{ opacity: 0, y: -16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
-          className="text-center mb-12"
-        >
-          <p
-            style={{ color: "#C9A84C", letterSpacing: "0.35em" }}
-            className="text-[10px] font-medium uppercase mb-2"
-          >
-            Maison de Parfum
-          </p>
-          <h1
-            style={{
-              fontFamily: "'Cormorant Garamond', serif",
-              color: "#f5ede0",
-              letterSpacing: "0.08em",
-            }}
-            className="text-3xl md:text-5xl font-light tracking-wide"
-          >
-            Musc Royal <span style={{ color: "#C9A84C" }}>Maroc</span>
-          </h1>
-          <div
-            style={{
-              background:
-                "linear-gradient(90deg, transparent, #C9A84C, transparent)",
-              height: "1px",
-            }}
-            className="w-48 mx-auto mt-4 opacity-60"
-          />
-        </motion.div>
+function Header({ route, go, cartCount }) {
+  const [open, setOpen] = useState(false);
+  const links = [
+    ["home", "Accueil"],
+    ["catalog", "Catalogue"],
+    ["collections", "Collections"],
+    ["catalog-new", "Nouveautés"],
+    ["brands", "Marques"],
+    ["about", "À propos"],
+    ["contact", "Contact"],
+  ];
+  return (
+    <header
+      className="sticky top-0 z-40 border-b"
+      style={{ background: "rgba(11,11,12,0.92)", backdropFilter: "blur(10px)", borderColor: COLORS.line }}
+    >
+      <div className="max-w-7xl mx-auto flex items-center justify-between px-5 md:px-8 h-16">
+        <button onClick={() => go("home")} className="flex flex-col items-start leading-none">
+          <span style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, color: COLORS.ink }}>MAISON</span>
+          <span style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, color: COLORS.gold, marginTop: -4 }}>NOVARE</span>
+        </button>
 
-        {/* Card */}
-        <div
-          className="perf-card relative w-full max-w-5xl rounded-2xl overflow-hidden"
-          style={{ background: "#0d0d0b" }}
-        >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={p.id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.5 }}
-              className="flex flex-col md:flex-row min-h-[540px]"
-            >
-              {/* ── LEFT : Image ── */}
-              <div className="img-wrapper relative w-full md:w-[46%] overflow-hidden"
-                style={{ minHeight: "320px" }}>
-                <motion.img
-                  key={p.id + "-img"}
-                  src={p.image}
-                  alt={p.title}
-                  initial={{ scale: 1.06, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.97, opacity: 0 }}
-                  transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  style={{ filter: "brightness(0.82) contrast(1.05)" }}
-                  onError={(e) =>
-                    (e.currentTarget.src =
-                      "https://images.unsplash.com/photo-1547997787-d8eee7fb7280?q=80&w=800")
-                  }
-                />
-                {/* Overlay gradient on right edge to blend */}
-                <div
-                  className="absolute inset-0 hidden md:block"
-                  style={{
-                    background:
-                      "linear-gradient(to right, transparent 70%, #0d0d0b)",
-                  }}
-                />
-                {/* Gold corner ornament */}
-                <div
-                  className="absolute bottom-4 left-4"
-                  style={{
-                    border: "1px solid rgba(201,168,76,0.4)",
-                    borderRadius: "2px",
-                    width: "40px",
-                    height: "40px",
-                    borderRight: "none",
-                    borderTop: "none",
-                  }}
-                />
-              </div>
-
-              {/* ── RIGHT : Content ── */}
-              <div className="relative flex flex-col justify-center px-8 md:px-10 py-10 md:w-[54%]">
-                {/* Ornament top */}
-                <div
-                  className="absolute top-6 right-8 hidden md:block"
-                  style={{
-                    border: "1px solid rgba(201,168,76,0.3)",
-                    borderRadius: "2px",
-                    width: "32px",
-                    height: "32px",
-                    borderLeft: "none",
-                    borderBottom: "none",
-                  }}
-                />
-
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={p.id + "-content"}
-                    initial={{ opacity: 0, x: 24 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -16 }}
-                    transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-                    className="space-y-5"
-                  >
-                    {/* Subtitle / collection label */}
-                    <motion.p
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.1, duration: 0.4 }}
-                      style={{ color: "#C9A84C", letterSpacing: "0.22em" }}
-                      className="text-[10px] uppercase font-medium"
-                    >
-                      {p.subtitle}
-                    </motion.p>
-
-                    {/* Title */}
-                    <motion.h2
-                      initial={{ opacity: 0, y: 12 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.15, duration: 0.5 }}
-                      style={{
-                        fontFamily: "'Cormorant Garamond', serif",
-                        color: "#f0e6d3",
-                        letterSpacing: "0.04em",
-                      }}
-                      className="text-4xl md:text-5xl font-light leading-tight"
-                    >
-                      {p.title}
-                    </motion.h2>
-
-                    {/* Description */}
-                    <motion.p
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.22, duration: 0.5 }}
-                      style={{ color: "rgba(240,230,211,0.65)", lineHeight: 1.8 }}
-                      className="text-sm font-light"
-                    >
-                      {p.description}
-                    </motion.p>
-
-                    <GoldDivider delay={0.3} />
-
-                    {/* Notes olfactives */}
-                    <div className="space-y-3">
-                      <NoteGroup label="Notes de tête" notes={p.notes.tete} delay={0.35} />
-                      <NoteGroup label="Notes de cœur" notes={p.notes.coeur} delay={0.42} />
-                      <NoteGroup label="Notes de fond" notes={p.notes.fond} delay={0.49} />
-                    </div>
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-            </motion.div>
-          </AnimatePresence>
-
-          {/* Progress bar */}
-          <div
-            className="absolute bottom-0 left-0 right-0"
-            style={{ height: "2px", background: "rgba(201,168,76,0.12)" }}
-          >
-            <motion.div
-              key={p.id + "-bar"}
-              initial={{ scaleX: 0 }}
-              animate={{ scaleX: 1 }}
-              transition={{ duration: 6, ease: "linear" }}
+        <nav className="hidden lg:flex items-center gap-7">
+          {links.map(([r, label]) => (
+            <button
+              key={r}
+              onClick={() => go(r)}
+              className="text-xs uppercase tracking-widest font-medium"
               style={{
-                originX: 0,
-                height: "100%",
-                background:
-                  "linear-gradient(90deg, #C9A84C, #E7C87A)",
+                fontFamily: "Inter",
+                color: route === r || (r === "catalog" && route === "product") ? COLORS.gold : COLORS.inkDim,
               }}
-            />
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="flex items-center gap-4">
+          <button onClick={() => go("admin")} className="hidden md:inline text-[11px] uppercase tracking-widest" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+            Admin
+          </button>
+          <button
+            className="lg:hidden flex flex-col gap-1.5 p-2"
+            onClick={() => setOpen((o) => !o)}
+            aria-label="Menu"
+          >
+            <span style={{ width: 22, height: 2, background: COLORS.ink, display: "block" }} />
+            <span style={{ width: 22, height: 2, background: COLORS.ink, display: "block" }} />
+            <span style={{ width: 14, height: 2, background: COLORS.gold, display: "block" }} />
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="lg:hidden border-t" style={{ borderColor: COLORS.line, background: COLORS.bg }}>
+          <div className="flex flex-col px-5 py-3">
+            {links.map(([r, label]) => (
+              <button
+                key={r}
+                onClick={() => { go(r); setOpen(false); }}
+                className="text-left py-3 text-sm uppercase tracking-widest border-b"
+                style={{ fontFamily: "Inter", color: route === r ? COLORS.gold : COLORS.ink, borderColor: COLORS.line }}
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              onClick={() => { go("admin"); setOpen(false); }}
+              className="text-left py-3 text-sm uppercase tracking-widest"
+              style={{ fontFamily: "Inter", color: COLORS.inkDim }}
+            >
+              Admin
+            </button>
+          </div>
+        </div>
+      )}
+    </header>
+  );
+}
+
+/* ---------------- Hero ---------------- */
+
+function Hero({ go }) {
+  return (
+    <section className="relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${COLORS.bg} 0%, #141416 60%, #0B0B0C 100%)` }}>
+      <div
+        aria-hidden
+        className="absolute inset-0 opacity-40"
+        style={{
+          background: `radial-gradient(circle at 80% 20%, rgba(201,169,97,0.18), transparent 45%), radial-gradient(circle at 10% 90%, rgba(201,169,97,0.10), transparent 40%)`,
+        }}
+      />
+      <div className="max-w-7xl mx-auto px-5 md:px-8 pt-14 pb-16 md:pt-24 md:pb-24 relative grid md:grid-cols-2 gap-10 items-center">
+        <div className="relative z-10">
+          <Eyebrow>Collection permanente</Eyebrow>
+          <h1
+            className="mt-5 leading-[0.95]"
+            style={{ fontFamily: "Anton", fontSize: "clamp(48px, 9vw, 96px)", color: COLORS.ink, letterSpacing: 0.5 }}
+          >
+            MAISON
+            <br />
+            <span style={{ color: COLORS.gold }}>NOVARE</span>
+          </h1>
+          <p className="mt-5 text-base md:text-lg max-w-md" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>
+            Une autre vision du style. Streetwear premium, matières sélectionnées, silhouettes conçues pour durer.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-4">
+            <SolidButton onClick={() => go("catalog")}>Découvrir le catalogue</SolidButton>
+            <GhostButton onClick={() => go("catalog-new")}>Voir les nouveautés</GhostButton>
           </div>
         </div>
 
-        {/* Navigation */}
-        <div className="flex items-center gap-3 mt-8">
-          {perfumes.map((perf, i) => {
-            const isActive = i === current
-            return (
+        <div className="relative h-[380px] md:h-[520px]">
+          <div className="absolute inset-0 grid grid-cols-2 gap-4">
+            <div className="relative rounded-sm overflow-hidden translate-y-6">
+              <img src={img("hero-a", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" />
+              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,11,12,0.6))" }} />
+            </div>
+            <div className="relative rounded-sm overflow-hidden -translate-y-6">
+              <img src={img("hero-b", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" />
+              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,11,12,0.6))" }} />
+            </div>
+          </div>
+          <div
+            className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 text-[11px] uppercase tracking-widest font-semibold"
+            style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+          >
+            Édition permanente — NVR
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t" style={{ borderColor: COLORS.line }}>
+        <div className="max-w-7xl mx-auto px-5 md:px-8 py-5 grid grid-cols-3 gap-4 text-center">
+          {[
+            ["Livraison", "Partout en France"],
+            ["Remise en main propre", "Paris & Île-de-France"],
+            ["Service client", "7 jours / 7"],
+          ].map(([t, s]) => (
+            <div key={t}>
+              <div className="text-[11px] md:text-xs uppercase tracking-widest font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{t}</div>
+              <div className="text-[10px] md:text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{s}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Category grid ---------------- */
+
+function CategoryGrid({ go, setCategoryFilter }) {
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-16">
+      <Eyebrow>Univers</Eyebrow>
+      <h2 className="mt-3 mb-8" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>
+        CATÉGORIES
+      </h2>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        {CATEGORIES.map((c, i) => (
+          <button
+            key={c.id}
+            onClick={() => { setCategoryFilter(c.id); go("catalog"); }}
+            className="relative group text-left overflow-hidden rounded-sm"
+            style={{ aspectRatio: "3/4" }}
+          >
+            <img
+              src={img("cat-" + c.id, 500, 650)}
+              alt={c.name}
+              className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+            />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(11,11,12,0.1) 30%, rgba(11,11,12,0.9))" }} />
+            <TagCorner />
+            <div className="absolute top-3 left-3 text-[11px] font-mono" style={{ color: COLORS.gold }}>{c.tag}</div>
+            <div className="absolute bottom-0 p-4">
+              <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink, letterSpacing: 0.5 }}>{c.name.toUpperCase()}</div>
+              <div className="text-[11px] mt-1" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>{c.desc}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Product card ---------------- */
+
+function ProductCard({ product, brand, onOpen }) {
+  return (
+    <button onClick={() => onOpen(product.id)} className="relative text-left group">
+      <div className="relative overflow-hidden rounded-sm" style={{ background: COLORS.surface, aspectRatio: "3/4" }}>
+        <img
+          src={product.images[0]}
+          alt={product.name}
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+        />
+        <TagCorner />
+        <div className="absolute top-3 left-3 flex gap-2">
+          {product.isNew && <Badge>Nouveau</Badge>}
+          {product.featured && <Badge tone="dark">En avant</Badge>}
+        </div>
+        {!product.availability && (
+          <div className="absolute inset-x-0 bottom-0 py-1.5 text-center text-[10px] uppercase tracking-widest" style={{ background: "rgba(0,0,0,0.7)", color: COLORS.inkDim, fontFamily: "Inter" }}>
+            Rupture de stock
+          </div>
+        )}
+      </div>
+      <div className="mt-3">
+        <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{brand?.name}</div>
+        <div className="text-sm mt-0.5" style={{ color: COLORS.ink, fontFamily: "Inter", fontWeight: 600 }}>{product.name}</div>
+        <div className="text-[11px] mt-0.5 font-mono" style={{ color: COLORS.inkDim }}>{product.reference}</div>
+      </div>
+    </button>
+  );
+}
+
+/* ---------------- Catalog ---------------- */
+
+function Catalog({ products, brands, initialCategory, forceNew, onOpen, go }) {
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState(initialCategory || "all");
+  const [brand, setBrand] = useState("all");
+  const [size, setSize] = useState("all");
+  const [color, setColor] = useState("all");
+  const [onlyNew, setOnlyNew] = useState(!!forceNew);
+  const [onlyFeatured, setOnlyFeatured] = useState(false);
+  const [sort, setSort] = useState("relevance");
+  const [mobileFilters, setMobileFilters] = useState(false);
+
+  useEffect(() => { setCategory(initialCategory || "all"); }, [initialCategory]);
+  useEffect(() => { setOnlyNew(!!forceNew); }, [forceNew]);
+
+  const allSizes = useMemo(() => Array.from(new Set(products.flatMap((p) => p.sizes))).sort(), [products]);
+  const allColors = useMemo(() => Array.from(new Set(products.flatMap((p) => p.colors))), [products]);
+
+  const filtered = useMemo(() => {
+    let list = products.filter((p) => {
+      if (search && !(`${p.name} ${p.reference}`.toLowerCase().includes(search.toLowerCase()))) return false;
+      if (category !== "all" && p.categoryId !== category) return false;
+      if (brand !== "all" && p.brandId !== brand) return false;
+      if (size !== "all" && !p.sizes.includes(size)) return false;
+      if (color !== "all" && !p.colors.includes(color)) return false;
+      if (onlyNew && !p.isNew) return false;
+      if (onlyFeatured && !p.featured) return false;
+      return true;
+    });
+    if (sort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+    if (sort === "new") list = [...list].sort((a, b) => Number(b.isNew) - Number(a.isNew));
+    return list;
+  }, [products, search, category, brand, size, color, onlyNew, onlyFeatured, sort]);
+
+  const Filters = () => (
+    <div className="space-y-6">
+      <div>
+        <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Catégorie</label>
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle}>
+          <option value="all">Toutes</option>
+          {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Marque</label>
+        <select value={brand} onChange={(e) => setBrand(e.target.value)} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle}>
+          <option value="all">Toutes</option>
+          {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Taille</label>
+        <select value={size} onChange={(e) => setSize(e.target.value)} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle}>
+          <option value="all">Toutes</option>
+          {allSizes.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleur</label>
+        <select value={color} onChange={(e) => setColor(e.target.value)} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle}>
+          <option value="all">Toutes</option>
+          {allColors.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+        <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} />
+        Nouveautés uniquement
+      </label>
+      <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+        <input type="checkbox" checked={onlyFeatured} onChange={(e) => setOnlyFeatured(e.target.checked)} />
+        Mis en avant uniquement
+      </label>
+      <button
+        onClick={() => { setSearch(""); setCategory("all"); setBrand("all"); setSize("all"); setColor("all"); setOnlyNew(false); setOnlyFeatured(false); }}
+        className="text-xs uppercase tracking-widest underline"
+        style={{ color: COLORS.gold, fontFamily: "Inter" }}
+      >
+        Réinitialiser les filtres
+      </button>
+    </div>
+  );
+
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
+      <Eyebrow>Catalogue</Eyebrow>
+      <div className="flex items-end justify-between flex-wrap gap-4 mt-3 mb-8">
+        <h1 style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>TOUT LE CATALOGUE</h1>
+        <div className="flex items-center gap-3 flex-wrap">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher un produit, une référence…"
+            className="px-4 py-2.5 text-sm rounded-sm w-64 max-w-full"
+            style={selectStyle}
+          />
+          <select value={sort} onChange={(e) => setSort(e.target.value)} className="px-3 py-2.5 text-sm rounded-sm" style={selectStyle}>
+            <option value="relevance">Pertinence</option>
+            <option value="name">Nom (A–Z)</option>
+            <option value="new">Nouveautés d'abord</option>
+          </select>
+          <button
+            className="lg:hidden px-4 py-2.5 text-xs uppercase tracking-widest border rounded-sm"
+            style={{ borderColor: COLORS.line, color: COLORS.ink, fontFamily: "Inter" }}
+            onClick={() => setMobileFilters(true)}
+          >
+            Filtres
+          </button>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-[220px_1fr] gap-10">
+        <aside className="hidden lg:block">
+          <Filters />
+        </aside>
+
+        <div>
+          <div className="text-xs mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{filtered.length} produit{filtered.length > 1 ? "s" : ""}</div>
+          {filtered.length === 0 ? (
+            <div className="py-24 text-center border rounded-sm" style={{ borderColor: COLORS.line }}>
+              <div style={{ fontFamily: "Anton", fontSize: 24, color: COLORS.ink }}>AUCUN RÉSULTAT</div>
+              <p className="mt-2 text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Essayez d'élargir vos filtres ou votre recherche.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-5 md:gap-6">
+              {filtered.map((p) => (
+                <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={onOpen} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {mobileFilters && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setMobileFilters(false)} />
+          <div className="absolute right-0 top-0 bottom-0 w-80 max-w-[85vw] p-6 overflow-y-auto" style={{ background: COLORS.surface }}>
+            <div className="flex items-center justify-between mb-6">
+              <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>FILTRES</div>
+              <button onClick={() => setMobileFilters(false)} style={{ color: COLORS.ink }}>✕</button>
+            </div>
+            <Filters />
+            <SolidButton className="w-full mt-6" onClick={() => setMobileFilters(false)}>Voir les résultats</SolidButton>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const selectStyle = {
+  background: COLORS.surface,
+  border: `1px solid ${COLORS.line}`,
+  color: COLORS.ink,
+  fontFamily: "Inter",
+};
+
+/* ---------------- Product page ---------------- */
+
+function ProductPage({ product, brand, products, brands, onOpen, go }) {
+  const [activeImg, setActiveImg] = useState(0);
+  const [selSize, setSelSize] = useState(product.sizes[0] || null);
+  const [selColor, setSelColor] = useState(product.colors[0] || null);
+  const touchStart = useRef(null);
+
+  useEffect(() => { setActiveImg(0); setSelSize(product.sizes[0] || null); setSelColor(product.colors[0] || null); }, [product.id]);
+
+  const similar = products.filter((p) => p.id !== product.id && p.categoryId === product.categoryId).slice(0, 4);
+
+  const onTouchStart = (e) => { touchStart.current = e.touches[0].clientX; };
+  const onTouchEnd = (e) => {
+    if (touchStart.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStart.current;
+    if (dx > 50) setActiveImg((i) => (i - 1 + product.images.length) % product.images.length);
+    if (dx < -50) setActiveImg((i) => (i + 1) % product.images.length);
+    touchStart.current = null;
+  };
+
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
+      <button onClick={() => go("catalog")} className="text-xs uppercase tracking-widest mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        ← Retour au catalogue
+      </button>
+
+      <div className="grid md:grid-cols-2 gap-10">
+        <div>
+          <div
+            className="relative rounded-sm overflow-hidden"
+            style={{ background: COLORS.surface, aspectRatio: "4/5" }}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+          >
+            <img
+              src={product.images[activeImg]}
+              alt={product.name}
+              className="w-full h-full object-cover transition-opacity duration-300"
+            />
+            <TagCorner />
+            <div className="absolute top-3 left-3 flex gap-2">
+              {product.isNew && <Badge>Nouveau</Badge>}
+              {product.featured && <Badge tone="dark">En avant</Badge>}
+            </div>
+          </div>
+          <div className="flex gap-3 mt-4 overflow-x-auto pb-1">
+            {product.images.map((im, i) => (
               <button
-                key={perf.id}
-                onClick={() => go(i)}
-                className="nav-pill flex items-center gap-2 rounded-full px-4 py-2 focus:outline-none"
-                style={{
-                  background: isActive
-                    ? "rgba(201,168,76,0.18)"
-                    : "rgba(255,255,255,0.04)",
-                  border: isActive
-                    ? "1px solid rgba(201,168,76,0.55)"
-                    : "1px solid rgba(255,255,255,0.08)",
-                  color: isActive ? "#E7C87A" : "rgba(240,230,211,0.45)",
-                  fontFamily: "'Jost', sans-serif",
-                  fontSize: "11px",
-                  letterSpacing: "0.12em",
-                  fontWeight: isActive ? 500 : 300,
-                  textTransform: "uppercase",
-                }}
+                key={i}
+                onClick={() => setActiveImg(i)}
+                className="shrink-0 rounded-sm overflow-hidden"
+                style={{ width: 72, height: 90, outline: activeImg === i ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}` }}
               >
-                {/* Roman numeral dot */}
-                <span
-                  style={{
-                    width: "6px",
-                    height: "6px",
-                    borderRadius: "50%",
-                    background: isActive ? "#C9A84C" : "rgba(201,168,76,0.25)",
-                    flexShrink: 0,
-                    transition: "all 0.4s ease",
-                  }}
-                />
-                <span className="hidden sm:inline">{perf.nav}</span>
+                <img src={im} alt="" className="w-full h-full object-cover" />
               </button>
-            )
-          })}
+            ))}
+          </div>
         </div>
 
-        {/* Footer signature */}
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1.2, duration: 1 }}
-          style={{ color: "rgba(201,168,76,0.3)", letterSpacing: "0.3em" }}
-          className="text-[9px] uppercase mt-8 text-center"
-        >
-          L'Art du Parfum Oriental · Depuis Marrakech
-        </motion.p>
+        <div>
+          <div className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{brand?.name}</div>
+          <h1 className="mt-2" style={{ fontFamily: "Anton", fontSize: "clamp(28px,4vw,40px)", color: COLORS.ink }}>{product.name.toUpperCase()}</h1>
+          <div className="mt-2 text-xs font-mono" style={{ color: COLORS.inkDim }}>Réf. {product.reference}</div>
+
+          <p className="mt-5 text-sm leading-relaxed max-w-md" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{product.description}</p>
+
+          {product.colors.length > 0 && (
+            <div className="mt-6">
+              <div className="text-[11px] uppercase tracking-widest mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleur — {selColor}</div>
+              <div className="flex gap-2">
+                {product.colors.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setSelColor(c)}
+                    className="w-8 h-8 rounded-full"
+                    style={{ background: COLOR_SWATCHES[c] || "#444", outline: selColor === c ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}`, outlineOffset: 2 }}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {product.sizes.length > 0 && (
+            <div className="mt-6">
+              <div className="text-[11px] uppercase tracking-widest mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Taille</div>
+              <div className="flex flex-wrap gap-2">
+                {product.sizes.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setSelSize(s)}
+                    className="px-4 py-2 text-sm rounded-sm"
+                    style={{
+                      border: `1px solid ${selSize === s ? COLORS.gold : COLORS.line}`,
+                      color: selSize === s ? COLORS.gold : COLORS.ink,
+                      fontFamily: "Inter",
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 text-sm" style={{ fontFamily: "Inter" }}>
+            {product.availability ? (
+              <span style={{ color: "#7CC49A" }}>● Disponible</span>
+            ) : (
+              <span style={{ color: "#C97C7C" }}>● Rupture de stock</span>
+            )}
+          </div>
+
+          <div className="mt-8 flex flex-wrap gap-4">
+            <SolidButton onClick={() => go("contact")}>Nous contacter pour ce produit</SolidButton>
+            <GhostButton onClick={() => go("catalog")}>Continuer à explorer</GhostButton>
+          </div>
+
+          <div className="mt-8 pt-8 border-t text-sm space-y-1" style={{ borderColor: COLORS.line, fontFamily: "Inter", color: COLORS.inkDim }}>
+            <div>Catégorie : {CATEGORIES.find((c) => c.id === product.categoryId)?.name}</div>
+            <div>Marque : {brand?.name}</div>
+          </div>
+        </div>
       </div>
-    </>
-  )
+
+      {similar.length > 0 && (
+        <div className="mt-20">
+          <Eyebrow>Vous aimerez aussi</Eyebrow>
+          <h2 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: 28, color: COLORS.ink }}>PRODUITS SIMILAIRES</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+            {similar.map((p) => (
+              <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------------- Brands page ---------------- */
+
+function BrandsPage({ brands, products, onOpenBrand, selectedBrand, onOpen, go }) {
+  if (selectedBrand) {
+    const brand = brands.find((b) => b.id === selectedBrand);
+    const brandProducts = products.filter((p) => p.brandId === selectedBrand);
+    return (
+      <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
+        <button onClick={() => onOpenBrand(null)} className="text-xs uppercase tracking-widest mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+          ← Toutes les marques
+        </button>
+        <Eyebrow>Marque</Eyebrow>
+        <h1 className="mt-3 mb-2" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>{brand.name.toUpperCase()}</h1>
+        <p className="max-w-lg text-sm mb-8" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{brand.description}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+          {brandProducts.map((p) => (
+            <ProductCard key={p.id} product={p} brand={brand} onOpen={onOpen} />
+          ))}
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
+      <Eyebrow>Univers Novare</Eyebrow>
+      <h1 className="mt-3 mb-8" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>MARQUES</h1>
+      <div className="grid md:grid-cols-2 gap-5">
+        {brands.map((b) => {
+          const count = products.filter((p) => p.brandId === b.id).length;
+          return (
+            <button key={b.id} onClick={() => onOpenBrand(b.id)} className="relative text-left p-6 rounded-sm border overflow-hidden group" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+              <TagCorner />
+              <div style={{ fontFamily: "Anton", fontSize: 26, color: COLORS.ink }}>{b.name.toUpperCase()}</div>
+              <p className="text-sm mt-2 max-w-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{b.description}</p>
+              <div className="text-xs mt-4 uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{count} produit{count > 1 ? "s" : ""} →</div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Collections (curated views) ---------------- */
+
+function CollectionsPage({ products, brands, onOpen, go, setCategoryFilter }) {
+  const featured = products.filter((p) => p.featured);
+  const news = products.filter((p) => p.isNew);
+  const groups = [
+    { title: "PIÈCES SIGNATURE", items: featured },
+    { title: "DERNIÈRES ARRIVÉES", items: news },
+  ];
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
+      <Eyebrow>Sélections</Eyebrow>
+      <h1 className="mt-3 mb-10" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>COLLECTIONS</h1>
+      {groups.map((g) => (
+        <div key={g.title} className="mb-14">
+          <h2 className="mb-5" style={{ fontFamily: "Anton", fontSize: 24, color: COLORS.gold }}>{g.title}</h2>
+          {g.items.length === 0 ? (
+            <p className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Aucune pièce pour le moment.</p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+              {g.items.map((p) => (
+                <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={onOpen} />
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/* ---------------- About ---------------- */
+
+function AboutPage({ go }) {
+  return (
+    <section className="max-w-4xl mx-auto px-5 md:px-8 py-16">
+      <Eyebrow>Maison</Eyebrow>
+      <h1 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>À PROPOS</h1>
+      <p className="text-sm leading-relaxed mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        Maison Novare est une plateforme catalogue réunissant plusieurs marques de streetwear premium. Notre rôle : sélectionner, présenter et organiser des pièces vestimentaires, chaussures, sacs, accessoires, casquettes et montres au sein d'une expérience unique.
+      </p>
+      <p className="text-sm leading-relaxed mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        Chaque fiche produit indique clairement sa marque d'origine. Nous ne présentons aucun produit comme partenaire officiel, revendeur agréé ou affilié à une marque sans autorisation vérifiée.
+      </p>
+      <SolidButton onClick={() => go("catalog")}>Explorer le catalogue</SolidButton>
+    </section>
+  );
+}
+
+/* ---------------- Contact ---------------- */
+
+function ContactPage() {
+  const [sent, setSent] = useState(false);
+  const [form, setForm] = useState({ nom: "", prenom: "", email: "", tel: "", sujet: "", message: "" });
+
+  const submit = (e) => {
+    e.preventDefault();
+    setSent(true);
+  };
+
+  return (
+    <section className="max-w-5xl mx-auto px-5 md:px-8 py-16 grid md:grid-cols-[1.2fr_1fr] gap-12">
+      <div>
+        <Eyebrow>Contact</Eyebrow>
+        <h1 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>PARLONS-EN</h1>
+
+        {sent ? (
+          <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.gold, background: COLORS.surface }}>
+            <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.gold }}>MESSAGE ENVOYÉ</div>
+            <p className="text-sm mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nous revenons vers vous rapidement.</p>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="grid sm:grid-cols-2 gap-4">
+            <input required placeholder="Nom" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.nom} onChange={(e) => setForm({ ...form, nom: e.target.value })} />
+            <input required placeholder="Prénom" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.prenom} onChange={(e) => setForm({ ...form, prenom: e.target.value })} />
+            <input required type="email" placeholder="Email" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <input placeholder="Téléphone" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.tel} onChange={(e) => setForm({ ...form, tel: e.target.value })} />
+            <input required placeholder="Sujet" className="px-4 py-3 text-sm rounded-sm sm:col-span-2" style={selectStyle} value={form.sujet} onChange={(e) => setForm({ ...form, sujet: e.target.value })} />
+            <textarea required placeholder="Message" rows={5} className="px-4 py-3 text-sm rounded-sm sm:col-span-2" style={selectStyle} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
+            <div className="sm:col-span-2">
+              <SolidButton className="w-full sm:w-auto">Envoyer</SolidButton>
+            </div>
+          </form>
+        )}
+      </div>
+
+      <div className="space-y-6">
+        <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Réseaux</div>
+          {["Instagram", "TikTok", "Snapchat", "WhatsApp"].map((s) => (
+            <div key={s} className="flex items-center justify-between py-2 border-b last:border-0 text-sm" style={{ borderColor: COLORS.line, fontFamily: "Inter", color: COLORS.ink }}>
+              {s}
+              <span className="text-xs" style={{ color: COLORS.inkDim }}>lien à renseigner</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Service</div>
+          <p className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Livraison partout en France. Remise en main propre disponible sur Paris et Île-de-France. Support 7j/7.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Admin dashboard ---------------- */
+
+function emptyProduct() {
+  return {
+    id: null,
+    name: "",
+    brandId: "",
+    categoryId: "",
+    reference: "",
+    description: "",
+    images: [],
+    sizes: [],
+    colors: [],
+    featured: false,
+    isNew: false,
+    availability: true,
+  };
+}
+
+function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories }) {
+  const [tab, setTab] = useState("products");
+  const [editing, setEditing] = useState(null); // product being edited, or emptyProduct()
+  const [editingBrand, setEditingBrand] = useState(null);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [imgUrlInput, setImgUrlInput] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const tabs = [
+    ["products", "Produits"],
+    ["brands", "Marques"],
+    ["categories", "Catégories"],
+  ];
+
+  /* -------- product CRUD -------- */
+  const saveProduct = () => {
+    if (!editing.name || !editing.brandId || !editing.categoryId || !editing.reference) return;
+    if (editing.id) {
+      setProducts((prev) => prev.map((p) => (p.id === editing.id ? editing : p)));
+    } else {
+      setProducts((prev) => [...prev, { ...editing, id: "p" + Date.now() }]);
+    }
+    setEditing(null);
+  };
+  const deleteProduct = (id) => {
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+    setConfirmDelete(null);
+  };
+  const addImage = () => {
+    if (!imgUrlInput.trim()) return;
+    setEditing((e) => ({ ...e, images: [...e.images, imgUrlInput.trim()] }));
+    setImgUrlInput("");
+  };
+  const removeImage = (idx) => setEditing((e) => ({ ...e, images: e.images.filter((_, i) => i !== idx) }));
+  const addQuickImage = () => setEditing((e) => ({ ...e, images: [...e.images, img("admin-" + Date.now())] }));
+
+  const toggleListValue = (field, value) => {
+    setEditing((e) => {
+      const list = e[field];
+      return { ...e, [field]: list.includes(value) ? list.filter((v) => v !== value) : [...list, value] };
+    });
+  };
+
+  /* -------- brand CRUD -------- */
+  const saveBrand = () => {
+    if (!editingBrand.name) return;
+    if (editingBrand.id) {
+      setBrands((prev) => prev.map((b) => (b.id === editingBrand.id ? editingBrand : b)));
+    } else {
+      const id = editingBrand.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      setBrands((prev) => [...prev, { ...editingBrand, id }]);
+    }
+    setEditingBrand(null);
+  };
+  const deleteBrand = (id) => setBrands((prev) => prev.filter((b) => b.id !== id));
+
+  /* -------- category CRUD -------- */
+  const saveCategory = () => {
+    if (!editingCategory.name) return;
+    if (editingCategory.id) {
+      setCategories((prev) => prev.map((c) => (c.id === editingCategory.id ? editingCategory : c)));
+    } else {
+      const id = editingCategory.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      setCategories((prev) => [...prev, { ...editingCategory, id, tag: String(prev.length + 1).padStart(2, "0") }]);
+    }
+    setEditingCategory(null);
+  };
+  const deleteCategory = (id) => setCategories((prev) => prev.filter((c) => c.id !== id));
+
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
+      <Eyebrow>Back-office</Eyebrow>
+      <h1 className="mt-3 mb-2" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,40px)", color: COLORS.ink }}>ADMINISTRATION</h1>
+      <p className="text-sm mb-8" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        Les modifications sont appliquées immédiatement dans cette session de démonstration (données en mémoire, non persistées).
+      </p>
+
+      <div className="flex gap-2 mb-8 border-b" style={{ borderColor: COLORS.line }}>
+        {tabs.map(([t, label]) => (
+          <button
+            key={t}
+            onClick={() => { setTab(t); setEditing(null); setEditingBrand(null); setEditingCategory(null); }}
+            className="px-4 py-3 text-xs uppercase tracking-widest font-semibold"
+            style={{ color: tab === t ? COLORS.gold : COLORS.inkDim, borderBottom: tab === t ? `2px solid ${COLORS.gold}` : "2px solid transparent", fontFamily: "Inter" }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* -------- PRODUCTS TAB -------- */}
+      {tab === "products" && !editing && (
+        <div>
+          <SolidButton onClick={() => setEditing(emptyProduct())} className="mb-6">+ Ajouter un produit</SolidButton>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ fontFamily: "Inter" }}>
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-widest" style={{ color: COLORS.inkDim }}>
+                  <th className="py-2 pr-4">Produit</th>
+                  <th className="py-2 pr-4">Marque</th>
+                  <th className="py-2 pr-4">Catégorie</th>
+                  <th className="py-2 pr-4">Réf.</th>
+                  <th className="py-2 pr-4">Statut</th>
+                  <th className="py-2 pr-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {products.map((p) => (
+                  <tr key={p.id} className="border-t" style={{ borderColor: COLORS.line }}>
+                    <td className="py-2 pr-4 flex items-center gap-2">
+                      <img src={p.images[0]} className="w-8 h-10 object-cover rounded-sm" alt="" />
+                      {p.name}
+                    </td>
+                    <td className="py-2 pr-4" style={{ color: COLORS.inkDim }}>{brands.find((b) => b.id === p.brandId)?.name || "—"}</td>
+                    <td className="py-2 pr-4" style={{ color: COLORS.inkDim }}>{categories.find((c) => c.id === p.categoryId)?.name || "—"}</td>
+                    <td className="py-2 pr-4 font-mono text-xs" style={{ color: COLORS.inkDim }}>{p.reference}</td>
+                    <td className="py-2 pr-4">
+                      <div className="flex gap-1 flex-wrap">
+                        {p.isNew && <Badge>Nouveau</Badge>}
+                        {p.featured && <Badge tone="dark">En avant</Badge>}
+                        {!p.availability && <Badge tone="dark">Rupture</Badge>}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-4">
+                      <div className="flex gap-3">
+                        <button onClick={() => setEditing(p)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
+                        <button onClick={() => setConfirmDelete(p.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === "products" && editing && (
+        <div className="max-w-3xl">
+          <div className="flex items-center justify-between mb-6">
+            <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink }}>{editing.id ? "MODIFIER LE PRODUIT" : "NOUVEAU PRODUIT"}</div>
+            <button onClick={() => setEditing(null)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Annuler</button>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nom du produit</label>
+              <input className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Référence</label>
+              <input className="w-full px-3 py-2 text-sm rounded-sm font-mono" style={selectStyle} value={editing.reference} onChange={(e) => setEditing({ ...editing, reference: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Marque</label>
+              <select className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle} value={editing.brandId} onChange={(e) => setEditing({ ...editing, brandId: e.target.value })}>
+                <option value="">— Choisir —</option>
+                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Catégorie</label>
+              <select className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle} value={editing.categoryId} onChange={(e) => setEditing({ ...editing, categoryId: e.target.value })}>
+                <option value="">— Choisir —</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Description</label>
+              <textarea rows={3} className="w-full px-3 py-2 text-sm rounded-sm" style={selectStyle} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Photos ({editing.images.length})</label>
+              <div className="flex flex-wrap gap-3 mb-3">
+                {editing.images.map((im, i) => (
+                  <div key={i} className="relative">
+                    <img src={im} className="w-16 h-20 object-cover rounded-sm" alt="" />
+                    <button onClick={() => removeImage(i)} className="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs" style={{ background: "#C97C7C", color: "#0B0B0C" }}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input placeholder="URL de l'image" className="flex-1 px-3 py-2 text-sm rounded-sm" style={selectStyle} value={imgUrlInput} onChange={(e) => setImgUrlInput(e.target.value)} />
+                <GhostButton onClick={addImage}>Ajouter l'URL</GhostButton>
+                <GhostButton onClick={addQuickImage}>+ Placeholder</GhostButton>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Tailles</label>
+              <div className="flex flex-wrap gap-2">
+                {["Unique", "38", "39", "40", "41", "42", "43", "44", "45", "XS", "S", "M", "L", "XL"].map((s) => (
+                  <button key={s} type="button" onClick={() => toggleListValue("sizes", s)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.sizes.includes(s) ? COLORS.gold : COLORS.line}`, color: editing.sizes.includes(s) ? COLORS.gold : COLORS.ink }}>{s}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleurs</label>
+              <div className="flex flex-wrap gap-2">
+                {Object.keys(COLOR_SWATCHES).map((c) => (
+                  <button key={c} type="button" onClick={() => toggleListValue("colors", c)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.colors.includes(c) ? COLORS.gold : COLORS.line}`, color: editing.colors.includes(c) ? COLORS.gold : COLORS.ink }}>{c}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="sm:col-span-2 flex flex-wrap gap-6 pt-2">
+              <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+                <input type="checkbox" checked={editing.featured} onChange={(e) => setEditing({ ...editing, featured: e.target.checked })} /> Mettre en avant
+              </label>
+              <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+                <input type="checkbox" checked={editing.isNew} onChange={(e) => setEditing({ ...editing, isNew: e.target.checked })} /> Marquer comme nouveauté
+              </label>
+              <label className="flex items-center gap-2 text-sm" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+                <input type="checkbox" checked={editing.availability} onChange={(e) => setEditing({ ...editing, availability: e.target.checked })} /> Disponible
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-8 flex gap-3">
+            <SolidButton onClick={saveProduct}>Enregistrer le produit</SolidButton>
+            <GhostButton onClick={() => setEditing(null)}>Annuler</GhostButton>
+          </div>
+        </div>
+      )}
+
+      {/* -------- BRANDS TAB -------- */}
+      {tab === "brands" && !editingBrand && (
+        <div>
+          <SolidButton onClick={() => setEditingBrand({ id: null, name: "", description: "" })} className="mb-6">+ Ajouter une marque</SolidButton>
+          <div className="grid sm:grid-cols-2 gap-4">
+            {brands.map((b) => (
+              <div key={b.id} className="p-4 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+                <div style={{ fontFamily: "Inter", fontWeight: 700, color: COLORS.ink }}>{b.name}</div>
+                <p className="text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{b.description}</p>
+                <div className="text-xs mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{products.filter((p) => p.brandId === b.id).length} produit(s)</div>
+                <div className="flex gap-3 mt-3">
+                  <button onClick={() => setEditingBrand(b)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
+                  <button onClick={() => deleteBrand(b.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "brands" && editingBrand && (
+        <div className="max-w-md">
+          <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink, marginBottom: 16 }}>{editingBrand.id ? "MODIFIER LA MARQUE" : "NOUVELLE MARQUE"}</div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nom</label>
+          <input className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingBrand.name} onChange={(e) => setEditingBrand({ ...editingBrand, name: e.target.value })} />
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Description</label>
+          <textarea rows={3} className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingBrand.description} onChange={(e) => setEditingBrand({ ...editingBrand, description: e.target.value })} />
+          <div className="flex gap-3">
+            <SolidButton onClick={saveBrand}>Enregistrer</SolidButton>
+            <GhostButton onClick={() => setEditingBrand(null)}>Annuler</GhostButton>
+          </div>
+        </div>
+      )}
+
+      {/* -------- CATEGORIES TAB -------- */}
+      {tab === "categories" && !editingCategory && (
+        <div>
+          <SolidButton onClick={() => setEditingCategory({ id: null, name: "", desc: "" })} className="mb-6">+ Ajouter une catégorie</SolidButton>
+          <div className="grid sm:grid-cols-2 gap-4">
+            {categories.map((c) => (
+              <div key={c.id} className="p-4 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+                <div style={{ fontFamily: "Inter", fontWeight: 700, color: COLORS.ink }}>{c.name}</div>
+                <p className="text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{c.desc}</p>
+                <div className="text-xs mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{products.filter((p) => p.categoryId === c.id).length} produit(s)</div>
+                <div className="flex gap-3 mt-3">
+                  <button onClick={() => setEditingCategory(c)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
+                  <button onClick={() => deleteCategory(c.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "categories" && editingCategory && (
+        <div className="max-w-md">
+          <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink, marginBottom: 16 }}>{editingCategory.id ? "MODIFIER LA CATÉGORIE" : "NOUVELLE CATÉGORIE"}</div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nom</label>
+          <input className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingCategory.name} onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })} />
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Courte description</label>
+          <input className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingCategory.desc} onChange={(e) => setEditingCategory({ ...editingCategory, desc: e.target.value })} />
+          <div className="flex gap-3">
+            <SolidButton onClick={saveCategory}>Enregistrer</SolidButton>
+            <GhostButton onClick={() => setEditingCategory(null)}>Annuler</GhostButton>
+          </div>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(0,0,0,0.7)" }}>
+          <div className="max-w-sm w-full p-6 rounded-sm" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+            <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>SUPPRIMER CE PRODUIT ?</div>
+            <p className="text-sm mt-2 mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Cette action est irréversible pour cette session.</p>
+            <div className="flex gap-3">
+              <SolidButton onClick={() => deleteProduct(confirmDelete)}>Supprimer</SolidButton>
+              <GhostButton onClick={() => setConfirmDelete(null)}>Annuler</GhostButton>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------------- Footer ---------------- */
+
+function Footer({ go }) {
+  return (
+    <footer className="border-t mt-10" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+      <div className="max-w-7xl mx-auto px-5 md:px-8 py-12 grid sm:grid-cols-2 md:grid-cols-4 gap-8">
+        <div>
+          <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>MAISON <span style={{ color: COLORS.gold }}>NOVARE</span></div>
+          <p className="text-xs mt-3 max-w-xs" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Plateforme catalogue streetwear premium — sélection multi-marques, service dédié.</p>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Navigation</div>
+          {[["home","Accueil"],["catalog","Catalogue"],["catalog-new","Nouveautés"],["collections","Collections"],["contact","Contact"]].map(([r,l]) => (
+            <button key={r} onClick={() => go(r)} className="block text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{l}</button>
+          ))}
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Catégories</div>
+          {CATEGORIES.map((c) => (
+            <div key={c.id} className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{c.name}</div>
+          ))}
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Service</div>
+          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Livraison France entière</div>
+          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Remise en main propre — Paris/IDF</div>
+          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Support 7j/7</div>
+        </div>
+      </div>
+      <div className="border-t py-5 text-center text-[11px]" style={{ borderColor: COLORS.line, color: COLORS.inkDim, fontFamily: "Inter" }}>
+        © 2026 Maison Novare — Tous droits réservés
+      </div>
+    </footer>
+  );
+}
+
+/* ---------------- App root ---------------- */
+
+export default function App() {
+  const [route, setRoute] = useState("home");
+  const [products, setProducts] = useState(INITIAL_PRODUCTS);
+  const [brands, setBrands] = useState(BRANDS);
+  const [categories, setCategories] = useState(CATEGORIES);
+  const [selectedProductId, setSelectedProductId] = useState(null);
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [selectedBrandId, setSelectedBrandId] = useState(null);
+
+  const go = (r) => {
+    setRoute(r);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const openProduct = (id) => {
+    setSelectedProductId(id);
+    setRoute("product");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const selectedBrand = selectedProduct ? brands.find((b) => b.id === selectedProduct.brandId) : null;
+
+  return (
+    <div style={{ background: COLORS.bg, minHeight: "100vh" }}>
+      <style>{FONT_IMPORT}{`
+        * { box-sizing: border-box; }
+        body { margin: 0; }
+        select, input, textarea { outline: none; }
+        select:focus, input:focus, textarea:focus { outline: 2px solid ${COLORS.gold}; outline-offset: 1px; }
+        button:focus-visible, a:focus-visible { outline: 2px solid ${COLORS.gold}; outline-offset: 2px; }
+        ::selection { background: ${COLORS.gold}; color: #0B0B0C; }
+      `}</style>
+
+      <Header route={route} go={go} />
+
+      {route === "home" && (
+        <>
+          <Hero go={go} />
+          <CategoryGrid go={go} setCategoryFilter={setCategoryFilter} />
+          <section className="max-w-7xl mx-auto px-5 md:px-8 pb-16">
+            <div className="flex items-end justify-between mb-6">
+              <div>
+                <Eyebrow>Nouveautés</Eyebrow>
+                <h2 className="mt-3" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>DERNIÈRES ARRIVÉES</h2>
+              </div>
+              <GhostButton onClick={() => go("catalog-new")}>Voir tout</GhostButton>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+              {products.filter((p) => p.isNew).slice(0, 4).map((p) => (
+                <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={openProduct} />
+              ))}
+            </div>
+          </section>
+          <section className="max-w-7xl mx-auto px-5 md:px-8 pb-20">
+            <div className="flex items-end justify-between mb-6">
+              <div>
+                <Eyebrow>Sélection</Eyebrow>
+                <h2 className="mt-3" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>PIÈCES SIGNATURE</h2>
+              </div>
+              <GhostButton onClick={() => go("collections")}>Voir tout</GhostButton>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+              {products.filter((p) => p.featured).slice(0, 4).map((p) => (
+                <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={openProduct} />
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+
+      {route === "catalog" && (
+        <Catalog products={products} brands={brands} initialCategory={categoryFilter} forceNew={false} onOpen={openProduct} go={go} />
+      )}
+      {route === "catalog-new" && (
+        <Catalog products={products} brands={brands} initialCategory="all" forceNew={true} onOpen={openProduct} go={go} />
+      )}
+
+      {route === "product" && selectedProduct && (
+        <ProductPage product={selectedProduct} brand={selectedBrand} products={products} brands={brands} onOpen={openProduct} go={go} />
+      )}
+
+      {route === "brands" && (
+        <BrandsPage brands={brands} products={products} onOpenBrand={setSelectedBrandId} selectedBrand={selectedBrandId} onOpen={openProduct} go={go} />
+      )}
+
+      {route === "collections" && (
+        <CollectionsPage products={products} brands={brands} onOpen={openProduct} go={go} setCategoryFilter={setCategoryFilter} />
+      )}
+
+      {route === "about" && <AboutPage go={go} />}
+
+      {route === "contact" && <ContactPage />}
+
+      {route === "admin" && (
+        <AdminDashboard
+          products={products} setProducts={setProducts}
+          brands={brands} setBrands={setBrands}
+          categories={categories} setCategories={setCategories}
+        />
+      )}
+
+      <Footer go={go} />
+    </div>
+  );
 }
