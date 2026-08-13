@@ -1,4 +1,19 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Maison Novare</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-type="module">
+const { useState, useMemo, useRef, useEffect } = React;
+
 
 /* ============================================================
    MAISON NOVARE — plateforme catalogue premium
@@ -1467,7 +1482,7 @@ function Footer({ go }) {
 
 const STORAGE_KEY = "maison-novare-catalog-data";
 
-export default function App() {
+function App() {
   const [route, setRoute] = useState("home");
   const [products, setProducts] = useState(INITIAL_PRODUCTS);
   const [brands, setBrands] = useState(BRANDS);
@@ -1482,43 +1497,31 @@ export default function App() {
   // Load any previously saved catalog data once, on first mount.
   // This is what makes admin edits (including added image URLs) survive a page refresh.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const result = await window.storage.get(STORAGE_KEY, false);
-        if (!cancelled && result && result.value) {
-          const data = JSON.parse(result.value);
-          if (Array.isArray(data.products)) setProducts(data.products);
-          if (Array.isArray(data.brands)) setBrands(data.brands);
-          if (Array.isArray(data.categories)) setCategories(data.categories);
-        }
-      } catch (err) {
-        // No saved data yet (first visit) — keep the built-in demo catalog.
-      } finally {
-        if (!cancelled) setLoaded(true);
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.products)) setProducts(data.products);
+        if (Array.isArray(data.brands)) setBrands(data.brands);
+        if (Array.isArray(data.categories)) setCategories(data.categories);
       }
-    })();
-    return () => { cancelled = true; };
+    } catch (err) {
+      // No saved data yet (first visit) — keep the built-in demo catalog.
+    } finally {
+      setLoaded(true);
+    }
   }, []);
 
   // Persist products/brands/categories any time they change, once initial load is done.
   useEffect(() => {
     if (!loaded) return;
-    let cancelled = false;
-    (async () => {
-      setSaveStatus("enregistrement");
-      try {
-        const result = await window.storage.set(
-          STORAGE_KEY,
-          JSON.stringify({ products, brands, categories }),
-          false
-        );
-        if (!cancelled) setSaveStatus(result ? "enregistré" : "erreur");
-      } catch (err) {
-        if (!cancelled) setSaveStatus("erreur");
-      }
-    })();
-    return () => { cancelled = true; };
+    setSaveStatus("enregistrement");
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ products, brands, categories }));
+      setSaveStatus("enregistré");
+    } catch (err) {
+      setSaveStatus("erreur");
+    }
   }, [products, brands, categories, loaded]);
 
   const go = (r) => {
@@ -1619,3 +1622,9 @@ export default function App() {
     </div>
   );
 }
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
