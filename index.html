@@ -54,6 +54,118 @@ const COLOR_SWATCHES = {
 
 const img = (seed, w = 900, h = 1100) => `https://picsum.photos/seed/${seed}/${w}/${h}`;
 
+/* Fallback shown whenever an <img> fails to load (broken URL, blocked hotlinking,
+   wrong domain, etc). Swaps the src instead of leaving a broken-image icon so the
+   admin and the visitor both get a clear, on-brand signal. */
+const BROKEN_IMAGE_FALLBACK =
+  "data:image/svg+xml;charset=UTF-8," +
+  encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='400' height='500'>
+       <rect width='100%' height='100%' fill='${COLORS.surface2}'/>
+       <text x='50%' y='48%' fill='${COLORS.inkDim}' font-family='sans-serif' font-size='16' text-anchor='middle'>Image indisponible</text>
+       <text x='50%' y='58%' fill='${COLORS.goldDim}' font-family='sans-serif' font-size='12' text-anchor='middle'>URL invalide ou bloquée</text>
+     </svg>`
+  );
+
+function handleImgError(e) {
+  // avoid infinite loop if the fallback itself somehow errors
+  e.currentTarget.onerror = null;
+  e.currentTarget.src = BROKEN_IMAGE_FALLBACK;
+}
+
+/* ============================================================
+   SUPABASE STORAGE — intégration active
+   ------------------------------------------------------------
+   Upload / suppression réels dans le bucket "product-images" du
+   projet Supabase, via l'API REST Storage (fetch), sans dépendre
+   du SDK @supabase/supabase-js (non disponible dans cet environnement
+   d'artifact).
+
+   Clé utilisée : clé "publishable" (publique), prévue pour être
+   exposée côté navigateur. Pour que l'upload et la suppression
+   fonctionnent réellement, le bucket "product-images" doit être
+   configuré côté Supabase avec des policies RLS autorisant
+   l'INSERT/DELETE pour le rôle utilisé ici (anon ou authenticated
+   selon votre configuration d'accès à l'admin).
+
+   L'écriture dans la table "product_images" (product_id, image_url,
+   sort_order, is_primary) reste à faire au moment où le produit est
+   enregistré (saveProduct), à partir du tableau editing.images —
+   voir le commentaire TODO SUPABASE à cet endroit plus bas.
+   ============================================================ */
+
+const SUPABASE_URL = "https://gdyavvhquzgvmsckszmi.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_E_69V4DOdDaDSw9Lf9xJ4A_Jhbo0xJX";
+const SUPABASE_BUCKET = "product-images";
+
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+const EXT_BY_MIME = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp" };
+
+function makeStoragePath(file) {
+  const ext = EXT_BY_MIME[file.type] || "jpg";
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `admin/${Date.now()}-${rand}.${ext}`;
+}
+
+// Upload réel vers Supabase Storage (bucket "product-images").
+// Renvoie l'URL publique du fichier, ou lève une erreur en cas d'échec.
+async function uploadToSupabase(file) {
+  if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+    throw new Error("Format non supporté");
+  }
+  const path = makeStoragePath(file);
+  const uploadUrl = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`;
+
+  const res = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": file.type,
+      "apikey": SUPABASE_PUBLISHABLE_KEY,
+      "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+      "x-upsert": "false",
+    },
+    body: file,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Échec de l'upload (${res.status})`);
+  }
+
+  // URL publique du fichier (le bucket doit être configuré en accès public en lecture).
+  const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`;
+  return { publicUrl, path };
+}
+
+// Extrait le "path" interne au bucket à partir d'une URL publique Supabase Storage,
+// pour pouvoir la supprimer. Retourne null si l'URL ne vient pas de ce bucket
+// (ex: ancien placeholder de démo picsum.photos) — dans ce cas on ne tente pas
+// de suppression côté Storage, on retire juste la photo de l'admin.
+function extractSupabasePath(imageUrl) {
+  const marker = `/storage/v1/object/public/${SUPABASE_BUCKET}/`;
+  const idx = imageUrl.indexOf(marker);
+  if (idx === -1) return null;
+  return imageUrl.slice(idx + marker.length);
+}
+
+// Suppression réelle du fichier dans Supabase Storage.
+async function deleteFromSupabase(imageUrl) {
+  const path = extractSupabasePath(imageUrl);
+  if (!path) return; // pas une URL Supabase (ex: placeholder de démo) → rien à supprimer côté Storage
+  const deleteUrl = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`;
+  const res = await fetch(deleteUrl, {
+    method: "DELETE",
+    headers: {
+      "apikey": SUPABASE_PUBLISHABLE_KEY,
+      "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+    },
+  });
+  if (!res.ok) {
+    // On n'interrompt pas le flux admin pour autant : la photo est déjà
+    // retirée de l'UI et de l'état local. On journalise pour diagnostic.
+    console.error("Suppression Supabase Storage échouée:", res.status, path);
+  }
+}
+
 function makeProduct(id, name, brandId, categoryId, ref, seedBase, opts = {}) {
   const nPhotos = opts.photos || 4;
   return {
@@ -286,11 +398,11 @@ function Hero({ go }) {
         <div className="relative h-[380px] md:h-[520px]">
           <div className="absolute inset-0 grid grid-cols-2 gap-4">
             <div className="relative rounded-sm overflow-hidden translate-y-6">
-              <img src={img("hero-a", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" />
+              <img src={img("hero-a", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
               <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,11,12,0.6))" }} />
             </div>
             <div className="relative rounded-sm overflow-hidden -translate-y-6">
-              <img src={img("hero-b", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" />
+              <img src={img("hero-b", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
               <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,11,12,0.6))" }} />
             </div>
           </div>
@@ -342,6 +454,7 @@ function CategoryGrid({ go, setCategoryFilter }) {
               src={img("cat-" + c.id, 500, 650)}
               alt={c.name}
               className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+              onError={handleImgError}
             />
             <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(11,11,12,0.1) 30%, rgba(11,11,12,0.9))" }} />
             <TagCorner />
@@ -367,6 +480,7 @@ function ProductCard({ product, brand, onOpen }) {
           src={product.images[0]}
           alt={product.name}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          onError={handleImgError}
         />
         <TagCorner />
         <div className="absolute top-3 left-3 flex gap-2">
@@ -584,6 +698,7 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
               src={product.images[activeImg]}
               alt={product.name}
               className="w-full h-full object-cover transition-opacity duration-300"
+              onError={handleImgError}
             />
             <TagCorner />
             <div className="absolute top-3 left-3 flex gap-2">
@@ -599,7 +714,7 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
                 className="shrink-0 rounded-sm overflow-hidden"
                 style={{ width: 72, height: 90, outline: activeImg === i ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}` }}
               >
-                <img src={im} alt="" className="w-full h-full object-cover" />
+                <img src={im} alt="" className="w-full h-full object-cover" onError={handleImgError} />
               </button>
             ))}
           </div>
@@ -853,13 +968,18 @@ function emptyProduct() {
   };
 }
 
-function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories }) {
+function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus }) {
   const [tab, setTab] = useState("products");
   const [editing, setEditing] = useState(null); // product being edited, or emptyProduct()
   const [editingBrand, setEditingBrand] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
-  const [imgUrlInput, setImgUrlInput] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
+
+  // -------- upload de photos (remplace l'ancien champ "URL de l'image") --------
+  const fileInputRef = useRef(null);
+  const [uploadStatus, setUploadStatus] = useState(""); // "", "uploading", "done"
+  const [uploadErrors, setUploadErrors] = useState([]); // noms de fichiers ayant échoué
+  const [dragIndex, setDragIndex] = useState(null); // index de la photo en cours de glisser-déposer
 
   const tabs = [
     ["products", "Produits"],
@@ -881,13 +1001,83 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     setProducts((prev) => prev.filter((p) => p.id !== id));
     setConfirmDelete(null);
   };
-  const addImage = () => {
-    if (!imgUrlInput.trim()) return;
-    setEditing((e) => ({ ...e, images: [...e.images, imgUrlInput.trim()] }));
-    setImgUrlInput("");
+
+  // -------- Sélection de fichiers depuis l'appareil (photos/pellicule ou dossier) --------
+  // Le tableau editing.images reste un tableau d'URLs (comme avant) : l'ordre du
+  // tableau EST l'ordre d'affichage (sort_order), et images[0] EST la photo
+  // principale (is_primary). Ce mapping garde tout le reste du site (catalogue,
+  // accueil, fiche produit) inchangé, car il lit déjà product.images[0].
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  const handleFilesSelected = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+
+    setUploadStatus("uploading");
+    setUploadErrors([]);
+
+    const results = await Promise.allSettled(files.map((file) => uploadToSupabase(file)));
+
+    const newUrls = [];
+    const failed = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        newUrls.push(r.value.publicUrl);
+        // TODO SUPABASE: insérer ici une ligne dans product_images
+        // { product_id: editing.id, image_url: r.value.publicUrl, sort_order: ..., is_primary: ... }
+        // (l'ID produit définitif n'existe que pour un produit déjà enregistré ;
+        // pour un nouveau produit, cette insertion se fait dans saveProduct
+        // au moment où l'id "p"+Date.now() est généré.)
+      } else {
+        failed.push(files[i].name);
+      }
+    });
+
+    if (newUrls.length > 0) {
+      setEditing((e) => ({ ...e, images: [...e.images, ...newUrls] }));
+    }
+    setUploadErrors(failed);
+    setUploadStatus("done");
+    // Laisse le message "Photos ajoutées ✓" visible un court instant.
+    setTimeout(() => setUploadStatus(""), 2500);
   };
-  const removeImage = (idx) => setEditing((e) => ({ ...e, images: e.images.filter((_, i) => i !== idx) }));
-  const addQuickImage = () => setEditing((e) => ({ ...e, images: [...e.images, img("admin-" + Date.now())] }));
+
+  const onFileInputChange = (e) => {
+    handleFilesSelected(e.target.files);
+    e.target.value = ""; // permet de re-sélectionner le(s) même(s) fichier(s) ensuite
+  };
+
+  const removeImage = async (idx) => {
+    const url = editing.images[idx];
+    setEditing((e) => ({ ...e, images: e.images.filter((_, i) => i !== idx) }));
+    // TODO SUPABASE: supprimer aussi la ligne product_images correspondante
+    // (ex: supabase.from('product_images').delete().eq('image_url', url)).
+    await deleteFromSupabase(url);
+  };
+
+  const setPrimaryImage = (idx) => {
+    setEditing((e) => {
+      if (idx === 0) return e;
+      const images = [...e.images];
+      const [chosen] = images.splice(idx, 1);
+      images.unshift(chosen);
+      return { ...e, images };
+    });
+  };
+
+  // -------- Réorganisation par drag-and-drop --------
+  const onImageDragStart = (idx) => setDragIndex(idx);
+  const onImageDragOver = (e) => e.preventDefault();
+  const onImageDrop = (idx) => {
+    setEditing((e) => {
+      if (dragIndex === null || dragIndex === idx) return e;
+      const images = [...e.images];
+      const [moved] = images.splice(dragIndex, 1);
+      images.splice(idx, 0, moved);
+      return { ...e, images };
+    });
+    setDragIndex(null);
+  };
 
   const toggleListValue = (field, value) => {
     setEditing((e) => {
@@ -925,9 +1115,16 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   return (
     <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
       <Eyebrow>Back-office</Eyebrow>
-      <h1 className="mt-3 mb-2" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,40px)", color: COLORS.ink }}>ADMINISTRATION</h1>
+      <div className="flex items-center gap-3 flex-wrap mt-3 mb-2">
+        <h1 style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,40px)", color: COLORS.ink }}>ADMINISTRATION</h1>
+        {saveStatus && (
+          <span className="text-[11px] uppercase tracking-widest" style={{ color: saveStatus === "erreur" ? "#C97C7C" : COLORS.gold, fontFamily: "Inter" }}>
+            {saveStatus === "enregistrement" ? "Enregistrement…" : saveStatus === "enregistré" ? "✓ Enregistré" : saveStatus === "erreur" ? "⚠ Erreur de sauvegarde" : ""}
+          </span>
+        )}
+      </div>
       <p className="text-sm mb-8" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-        Les modifications sont appliquées immédiatement dans cette session de démonstration (données en mémoire, non persistées).
+        Les modifications sont sauvegardées automatiquement et restent disponibles après actualisation de la page.
       </p>
 
       <div className="flex gap-2 mb-8 border-b" style={{ borderColor: COLORS.line }}>
@@ -963,7 +1160,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 {products.map((p) => (
                   <tr key={p.id} className="border-t" style={{ borderColor: COLORS.line }}>
                     <td className="py-2 pr-4 flex items-center gap-2">
-                      <img src={p.images[0]} className="w-8 h-10 object-cover rounded-sm" alt="" />
+                      <img src={p.images[0]} className="w-8 h-10 object-cover rounded-sm" alt="" onError={handleImgError} />
                       {p.name}
                     </td>
                     <td className="py-2 pr-4" style={{ color: COLORS.inkDim }}>{brands.find((b) => b.id === p.brandId)?.name || "—"}</td>
@@ -1026,20 +1223,87 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
             </div>
 
             <div className="sm:col-span-2">
-              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Photos ({editing.images.length})</label>
-              <div className="flex flex-wrap gap-3 mb-3">
-                {editing.images.map((im, i) => (
-                  <div key={i} className="relative">
-                    <img src={im} className="w-16 h-20 object-cover rounded-sm" alt="" />
-                    <button onClick={() => removeImage(i)} className="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs" style={{ background: "#C97C7C", color: "#0B0B0C" }}>✕</button>
+              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                Photos ({editing.images.length})
+              </label>
+
+              {editing.images.length > 0 && (
+                <>
+                  <div className="flex flex-wrap gap-3 mb-3">
+                    {editing.images.map((im, i) => (
+                      <div
+                        key={im + i}
+                        className="relative"
+                        draggable
+                        onDragStart={() => onImageDragStart(i)}
+                        onDragOver={onImageDragOver}
+                        onDrop={() => onImageDrop(i)}
+                        style={{ cursor: "grab", opacity: dragIndex === i ? 0.4 : 1 }}
+                        title="Glisser pour réorganiser"
+                      >
+                        <img src={im} className="w-16 h-20 object-cover rounded-sm" alt="" onError={handleImgError} style={{ border: i === 0 ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}` }} />
+                        <button
+                          onClick={() => removeImage(i)}
+                          className="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs"
+                          style={{ background: "#C97C7C", color: "#0B0B0C" }}
+                          title="Supprimer la photo"
+                        >
+                          ✕
+                        </button>
+                        {i === 0 ? (
+                          <span
+                            className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-[9px] uppercase tracking-widest font-semibold rounded-sm whitespace-nowrap"
+                            style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+                          >
+                            ★ Principale
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setPrimaryImage(i)}
+                            className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-[9px] uppercase tracking-widest rounded-sm whitespace-nowrap"
+                            style={{ background: COLORS.surface2, color: COLORS.inkDim, border: `1px solid ${COLORS.line}`, fontFamily: "Inter" }}
+                            title="Définir comme photo principale"
+                          >
+                            Définir principale
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input placeholder="URL de l'image" className="flex-1 px-3 py-2 text-sm rounded-sm" style={selectStyle} value={imgUrlInput} onChange={(e) => setImgUrlInput(e.target.value)} />
-                <GhostButton onClick={addImage}>Ajouter l'URL</GhostButton>
-                <GhostButton onClick={addQuickImage}>+ Placeholder</GhostButton>
-              </div>
+                  <p className="text-[11px] mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                    Glissez-déposez les photos pour changer leur ordre. La photo entourée en champagne est la photo principale.
+                  </p>
+                </>
+              )}
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                multiple
+                className="hidden"
+                onChange={onFileInputChange}
+              />
+              <GhostButton onClick={openFilePicker}>+ Ajouter des photos</GhostButton>
+
+              {uploadStatus === "uploading" && (
+                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
+                  Upload des photos…
+                </div>
+              )}
+              {uploadStatus === "done" && uploadErrors.length === 0 && (
+                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
+                  Photos ajoutées ✓
+                </div>
+              )}
+              {uploadErrors.length > 0 && (
+                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: "#C97C7C" }}>
+                  Impossible d'importer {uploadErrors.length > 1 ? "ces images" : "cette image"} : {uploadErrors.join(", ")}
+                </div>
+              )}
+              <p className="text-[11px] mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                Formats acceptés : JPG, JPEG, PNG, WEBP. Vous pouvez sélectionner plusieurs photos à la fois.
+              </p>
             </div>
 
             <div>
@@ -1201,6 +1465,8 @@ function Footer({ go }) {
 
 /* ---------------- App root ---------------- */
 
+const STORAGE_KEY = "maison-novare-catalog-data";
+
 export default function App() {
   const [route, setRoute] = useState("home");
   const [products, setProducts] = useState(INITIAL_PRODUCTS);
@@ -1209,6 +1475,51 @@ export default function App() {
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedBrandId, setSelectedBrandId] = useState(null);
+
+  const [loaded, setLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(""); // "", "enregistrement", "enregistré", "erreur"
+
+  // Load any previously saved catalog data once, on first mount.
+  // This is what makes admin edits (including added image URLs) survive a page refresh.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await window.storage.get(STORAGE_KEY, false);
+        if (!cancelled && result && result.value) {
+          const data = JSON.parse(result.value);
+          if (Array.isArray(data.products)) setProducts(data.products);
+          if (Array.isArray(data.brands)) setBrands(data.brands);
+          if (Array.isArray(data.categories)) setCategories(data.categories);
+        }
+      } catch (err) {
+        // No saved data yet (first visit) — keep the built-in demo catalog.
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist products/brands/categories any time they change, once initial load is done.
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    (async () => {
+      setSaveStatus("enregistrement");
+      try {
+        const result = await window.storage.set(
+          STORAGE_KEY,
+          JSON.stringify({ products, brands, categories }),
+          false
+        );
+        if (!cancelled) setSaveStatus(result ? "enregistré" : "erreur");
+      } catch (err) {
+        if (!cancelled) setSaveStatus("erreur");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [products, brands, categories, loaded]);
 
   const go = (r) => {
     setRoute(r);
@@ -1300,6 +1611,7 @@ export default function App() {
           products={products} setProducts={setProducts}
           brands={brands} setBrands={setBrands}
           categories={categories} setCategories={setCategories}
+          saveStatus={saveStatus}
         />
       )}
 
