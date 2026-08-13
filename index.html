@@ -127,12 +127,39 @@ const EXT_BY_MIME = {
   "image/heic": "heic", "image/heif": "heif",
 };
 
-// L'attribut "accept" du <input type="file"> : on liste à la fois les types
-// MIME connus et les extensions, car iOS ne renseigne pas toujours file.type
-// correctement pour le HEIC/HEIF — les extensions servent de filet de sécurité
-// pour que la pellicule affiche bien ces photos comme sélectionnables.
+// L'attribut "accept" du <input type="file"> : on liste les types MIME connus,
+// les extensions, ET "image/*" en filet de sécurité, car iOS ne renseigne pas
+// toujours file.type correctement pour le HEIC/HEIF ou certains partages —
+// ainsi la pellicule et l'app Fichiers proposent bien toutes les photos.
 const FILE_INPUT_ACCEPT =
-  "image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif";
+  "image/*,image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif";
+
+// -------- Détection du type réel d'un fichier par sa signature binaire --------
+// file.type est déclaré par le NAVIGATEUR/OS, pas garanti : sur iOS (Safari,
+// app Fichiers, partages tiers), il arrive vide ("") ou générique
+// ("application/octet-stream") même pour un JPG ou PNG parfaitement valide.
+// On ne doit donc JAMAIS bloquer un fichier uniquement parce que file.type
+// est vide — on vérifie plutôt les premiers octets réels du fichier
+// ("magic bytes"), qui ne mentent jamais sur le format.
+async function detectRealImageType(file) {
+  try {
+    const buf = await file.slice(0, 12).arrayBuffer();
+    const b = new Uint8Array(buf);
+
+    // JPEG: FF D8 FF
+    if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+    // WEBP: "RIFF"...."WEBP"
+    if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) return "image/webp";
+    // HEIC/HEIF (ISOBMFF): octets 4-11 = "ftyp" + marque
+    const ascii = String.fromCharCode(...b.slice(4, 12));
+    if (ascii.startsWith("ftyp") && /heic|heix|hevc|hevx|mif1|msf1/.test(ascii)) return "image/heic";
+  } catch {
+    // lecture binaire impossible → on retombe sur file.type plus bas
+  }
+  return null;
+}
 
 // -------- Détection HEIC/HEIF fiable --------
 // Sur iPhone/Safari, un fichier de la pellicule peut arriver avec file.type
@@ -148,17 +175,11 @@ async function isHeicFile(file) {
   const name = (file.name || "").toLowerCase();
   const looksHeicByName = name.endsWith(".heic") || name.endsWith(".heif");
 
-  // Les conteneurs HEIC/HEIF sont des fichiers ISOBMFF : les octets 4 à 11
-  // contiennent "ftyp" suivi d'un identifiant de marque (ex: "heic", "mif1").
-  try {
-    const header = await file.slice(0, 12).arrayBuffer();
-    const bytes = new Uint8Array(header);
-    const ascii = String.fromCharCode(...bytes.slice(4, 12));
-    const isIsobmffHeic = ascii.startsWith("ftyp") && /heic|heix|hevc|hevx|mif1|msf1/.test(ascii);
-    return isIsobmffHeic || (looksHeicByName && type === "");
-  } catch {
-    return looksHeicByName; // en dernier recours, si la lecture binaire échoue
-  }
+  const realType = await detectRealImageType(file);
+  if (realType === "image/heic") return true;
+  if (realType) return false; // signature détectée et ce n'est PAS du HEIC → certitude
+
+  return looksHeicByName; // aucune signature reconnue, on se rabat sur le nom
 }
 
 // -------- Chargement paresseux de la librairie de conversion HEIC --------
@@ -218,41 +239,111 @@ async function convertHeicIfNeeded(file) {
   return new File([blob], `${originalName}.jpg`, { type: "image/jpeg" });
 }
 
-function makeStoragePath(file) {
-  const ext = EXT_BY_MIME[file.type] || "jpg";
+// Libellés affichés dans le panneau de debug pour chaque étape de la chaîne d'upload.
+const STEP_LABELS = {
+  selection: "Sélection du fichier",
+  conversion: "Conversion",
+  connexion: "Connexion à Supabase",
+  upload: "Upload vers Supabase Storage",
+  url: "URL publique générée",
+};
+
+function makeStoragePath(realType) {
+  const ext = EXT_BY_MIME[realType] || "jpg";
   const rand = Math.random().toString(36).slice(2, 10);
   return `admin/${Date.now()}-${rand}.${ext}`;
 }
 
 // Upload réel vers Supabase Storage (bucket "product-images").
 // Convertit d'abord le fichier s'il s'agit d'un HEIC/HEIF, puis upload.
-// Renvoie l'URL publique du fichier, ou lève une erreur en cas d'échec.
-async function uploadToSupabase(file) {
-  const usableFile = await convertHeicIfNeeded(file);
+// IMPORTANT : ne rejette JAMAIS un fichier uniquement parce que file.type
+// (déclaré par le navigateur) est vide ou générique — on se base sur le
+// contenu réel du fichier (signature binaire) pour décider, et un fichier
+// est refusé seulement si sa signature ne correspond à AUCUN format image
+// connu (JPEG/PNG/WEBP/HEIC) ET que son nom ne laisse rien deviner non plus.
+//
+// Renvoie { publicUrl, path, steps } où "steps" trace chaque étape pour le
+// panneau de debug (voir DEBUG SYSTEM plus bas) : "selection", "conversion",
+// "connexion", "upload", "url".
+async function uploadToSupabase(file, onStep) {
+  const trace = (step, ok, detail) => onStep && onStep(step, ok, detail);
 
-  if (!ACCEPTED_IMAGE_TYPES.includes(usableFile.type)) {
-    throw new Error("Format non supporté");
+  trace("selection", true, `${file.name || "(sans nom)"} — type déclaré: "${file.type || "(vide)"}"`);
+
+  // Étape 1 - Déterminer le type réel du fichier à partir de son contenu, pas de
+  //    file.type (qui peut être vide/faux sur iOS).
+  const realType = await detectRealImageType(file);
+  const looksHeicByName = /\.(heic|heif)$/i.test(file.name || "");
+  const effectiveType = realType || (ACCEPTED_IMAGE_TYPES.includes(file.type) ? file.type : null);
+
+  if (!effectiveType && !looksHeicByName) {
+    trace("conversion", false, "Signature binaire non reconnue comme image (JPEG/PNG/WEBP/HEIC)");
+    throw new Error("Ce fichier ne semble pas être une image supportée");
   }
-  const path = makeStoragePath(usableFile);
+
+  // Étape 2 - Conversion HEIC → JPEG si nécessaire.
+  let usableFile = file;
+  const isHeic = effectiveType === "image/heic" || (!realType && looksHeicByName);
+  if (isHeic) {
+    try {
+      usableFile = await convertHeicIfNeeded(file);
+      trace("conversion", true, `Converti en JPEG (${(usableFile.size / 1024).toFixed(0)} Ko)`);
+    } catch (err) {
+      trace("conversion", false, err.message || String(err));
+      throw err;
+    }
+  } else {
+    // Fichier déjà dans un format web standard : on force le type MIME réel
+    // sur l'objet File envoyé à Supabase, au cas où file.type était vide,
+    // pour que le fichier stocké ait un Content-Type correct.
+    usableFile = effectiveType && effectiveType !== file.type
+      ? new File([file], file.name || "photo", { type: effectiveType })
+      : file;
+    trace("conversion", true, "Aucune conversion nécessaire");
+  }
+
+  const finalType = usableFile.type || effectiveType || "image/jpeg";
+  const path = makeStoragePath(finalType);
   const uploadUrl = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`;
 
-  const res = await fetch(uploadUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": usableFile.type,
-      "apikey": SUPABASE_PUBLISHABLE_KEY,
-      "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-      "x-upsert": "false",
-    },
-    body: usableFile,
-  });
-
-  if (!res.ok) {
-    throw new Error(`Échec de l'upload (${res.status})`);
+  // Étape 3 - Upload effectif vers Supabase Storage.
+  let res;
+  try {
+    res = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": finalType,
+        "apikey": SUPABASE_PUBLISHABLE_KEY,
+        "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        "x-upsert": "false",
+      },
+      body: usableFile,
+    });
+  } catch (networkErr) {
+    trace("connexion", false, `Requête réseau impossible vers Supabase : ${networkErr.message || networkErr}`);
+    throw new Error(`Connexion à Supabase impossible : ${networkErr.message || networkErr}`);
   }
 
-  // URL publique du fichier (le bucket doit être configuré en accès public en lecture).
+  trace("connexion", true, `Réponse reçue du serveur Supabase (HTTP ${res.status})`);
+
+  if (!res.ok) {
+    // On récupère le VRAI message d'erreur renvoyé par Supabase (JSON avec
+    // souvent { statusCode, error, message }), plutôt qu'un texte générique.
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      detail = body.message || body.error || JSON.stringify(body);
+    } catch {
+      try { detail = await res.text(); } catch {}
+    }
+    trace("upload", false, detail);
+    throw new Error(`Upload Supabase Storage échoué (${res.status}) : ${detail}`);
+  }
+  trace("upload", true, `Fichier stocké sous ${SUPABASE_BUCKET}/${path}`);
+
+  // Étape 4 - URL publique du fichier (le bucket doit être configuré en accès public en lecture).
   const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`;
+  trace("url", true, publicUrl);
   return { publicUrl, path };
 }
 
@@ -1098,8 +1189,12 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   // -------- upload de photos (remplace l'ancien champ "URL de l'image") --------
   const fileInputRef = useRef(null);
   const [uploadStatus, setUploadStatus] = useState(""); // "", "uploading", "done"
-  const [uploadErrors, setUploadErrors] = useState([]); // noms de fichiers ayant échoué
+  // debugLog : liste d'entrées { fileName, step, ok, detail } — trace RÉELLE
+  // de chaque étape (sélection/conversion/connexion/upload/url) pour chaque
+  // fichier, avec le message d'erreur exact renvoyé par Supabase le cas échéant.
+  const [debugLog, setDebugLog] = useState([]);
   const [dragIndex, setDragIndex] = useState(null); // index de la photo en cours de glisser-déposer
+  const [isDraggingOverDrop, setIsDraggingOverDrop] = useState(false); // zone glisser-déposer
 
   const tabs = [
     ["products", "Produits"],
@@ -1133,48 +1228,58 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
 
-    // Affiche "Conversion des photos HEIC…" seulement si la sélection en contient,
-    // sinon on passe directement à "Upload des photos…".
-    const heicFlags = await Promise.all(files.map((f) => isHeicFile(f)));
-    setUploadStatus(heicFlags.some(Boolean) ? "converting" : "uploading");
-    setUploadErrors([]);
-
-    const results = await Promise.allSettled(
-      files.map(async (file) => {
-        const uploaded = await uploadToSupabase(file);
-        return uploaded;
-      })
-    );
-
     setUploadStatus("uploading");
+    setDebugLog([]);
 
     const newUrls = [];
-    const failed = [];
-    results.forEach((r, i) => {
-      if (r.status === "fulfilled") {
-        newUrls.push(r.value.publicUrl);
-        // TODO SUPABASE: insérer ici une ligne dans product_images
-        // { product_id: editing.id, image_url: r.value.publicUrl, sort_order: ..., is_primary: ... }
-        // (l'ID produit définitif n'existe que pour un produit déjà enregistré ;
-        // pour un nouveau produit, cette insertion se fait dans saveProduct
-        // au moment où l'id "p"+Date.now() est généré.)
-      } else {
-        failed.push(files[i].name);
-      }
-    });
+    const fileLogs = []; // logs accumulés pendant cet appel (setDebugLog est asynchrone)
+
+    await Promise.allSettled(
+      files.map(async (file) => {
+        const fileName = file.name || "(photo sans nom)";
+        const onStep = (step, ok, detail) => {
+          fileLogs.push({ fileName, step, ok, detail });
+          setDebugLog((prev) => [...prev, { fileName, step, ok, detail }]);
+        };
+        try {
+          const uploaded = await uploadToSupabase(file, onStep);
+          newUrls.push(uploaded.publicUrl);
+          // TODO SUPABASE: insérer ici une ligne dans product_images
+          // { product_id: editing.id, image_url: uploaded.publicUrl, sort_order: ..., is_primary: ... }
+          // (l'ID produit définitif n'existe que pour un produit déjà enregistré ;
+          // pour un nouveau produit, cette insertion se fait dans saveProduct
+          // au moment où l'id "p"+Date.now() est généré.)
+        } catch (err) {
+          // L'étape en échec a déjà été tracée par onStep ci-dessus ; on
+          // s'assure ici qu'il existe AU MOINS une entrée d'échec même si
+          // l'erreur est survenue avant le premier trace() (cas improbable).
+          if (!fileLogs.some((l) => l.fileName === fileName && !l.ok)) {
+            const detail = err && err.message ? err.message : String(err);
+            fileLogs.push({ fileName, step: "upload", ok: false, detail });
+            setDebugLog((prev) => [...prev, { fileName, step: "upload", ok: false, detail }]);
+          }
+        }
+      })
+    );
 
     if (newUrls.length > 0) {
       setEditing((e) => ({ ...e, images: [...e.images, ...newUrls] }));
     }
-    setUploadErrors(failed);
     setUploadStatus("done");
-    // Laisse le message "Photos ajoutées ✓" visible un court instant.
-    setTimeout(() => setUploadStatus(""), 2500);
   };
 
   const onFileInputChange = (e) => {
     handleFilesSelected(e.target.files);
     e.target.value = ""; // permet de re-sélectionner le(s) même(s) fichier(s) ensuite
+  };
+
+  // -------- Solution de secours : glisser-déposer les photos directement --------
+  const onDropZoneDragOver = (e) => { e.preventDefault(); setIsDraggingOverDrop(true); };
+  const onDropZoneDragLeave = () => setIsDraggingOverDrop(false);
+  const onDropZoneDrop = (e) => {
+    e.preventDefault();
+    setIsDraggingOverDrop(false);
+    handleFilesSelected(e.dataTransfer.files);
   };
 
   const removeImage = async (idx) => {
@@ -1414,30 +1519,79 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 className="hidden"
                 onChange={onFileInputChange}
               />
-              <GhostButton onClick={openFilePicker}>📸 Ajouter des photos depuis mon téléphone</GhostButton>
 
-              {uploadStatus === "converting" && (
-                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
-                  Conversion des photos HEIC…
-                </div>
-              )}
+              {/* Solution de secours : glisser-déposer directement des fichiers,
+                  en plus du bouton de sélection (fonctionne aussi sur mobile
+                  si le navigateur le permet, mais surtout utile sur ordinateur). */}
+              <div
+                onDragOver={onDropZoneDragOver}
+                onDragLeave={onDropZoneDragLeave}
+                onDrop={onDropZoneDrop}
+                onClick={openFilePicker}
+                className="flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-sm text-center cursor-pointer transition-colors"
+                style={{
+                  border: `2px dashed ${isDraggingOverDrop ? COLORS.gold : COLORS.line}`,
+                  background: isDraggingOverDrop ? COLORS.surface2 : "transparent",
+                }}
+              >
+                <span style={{ fontSize: 22 }}>📷</span>
+                <span className="text-sm font-semibold" style={{ fontFamily: "Inter", color: COLORS.ink }}>
+                  Glissez-déposez vos photos ici
+                </span>
+                <span className="text-xs" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>
+                  ou cliquez pour choisir depuis mon téléphone / ordinateur
+                </span>
+              </div>
+              <div className="mt-3">
+                <GhostButton onClick={openFilePicker}>📷 Choisir depuis mon téléphone</GhostButton>
+              </div>
+
               {uploadStatus === "uploading" && (
                 <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
-                  Upload des photos…
+                  Import des photos en cours…
                 </div>
               )}
-              {uploadStatus === "done" && uploadErrors.length === 0 && (
+              {uploadStatus === "done" && debugLog.every((l) => l.ok) && debugLog.length > 0 && (
                 <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
                   Photos ajoutées ✓
                 </div>
               )}
-              {uploadErrors.length > 0 && (
-                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: "#C97C7C" }}>
-                  Impossible d'importer {uploadErrors.length > 1 ? "ces images" : "cette image"} : {uploadErrors.join(", ")}
+
+              {/* -------- Panneau de debug réel -------- */}
+              {/* Trace chaque étape (sélection / conversion / connexion / upload / url)
+                  pour chaque fichier, avec le message d'erreur EXACT renvoyé par
+                  Supabase en cas d'échec — jamais un message générique. */}
+              {debugLog.length > 0 && (
+                <div className="mt-3 rounded-sm overflow-hidden" style={{ border: `1px solid ${COLORS.line}` }}>
+                  <div className="px-3 py-2 text-[10px] uppercase tracking-widest" style={{ background: COLORS.surface2, color: COLORS.inkDim, fontFamily: "Inter" }}>
+                    Journal d'import
+                  </div>
+                  <div className="max-h-56 overflow-y-auto">
+                    {Object.entries(
+                      debugLog.reduce((acc, l) => {
+                        (acc[l.fileName] = acc[l.fileName] || []).push(l);
+                        return acc;
+                      }, {})
+                    ).map(([fileName, entries]) => (
+                      <div key={fileName} className="px-3 py-2 border-t" style={{ borderColor: COLORS.line }}>
+                        <div className="text-xs font-semibold mb-1" style={{ fontFamily: "Inter", color: COLORS.ink }}>{fileName}</div>
+                        {entries.map((l, idx) => (
+                          <div key={idx} className="text-[11px] flex items-start gap-1.5" style={{ fontFamily: "Inter", color: l.ok ? COLORS.inkDim : "#C97C7C" }}>
+                            <span>{l.ok ? "✅" : "❌"}</span>
+                            <span>
+                              <strong>{STEP_LABELS[l.step] || l.step}</strong>
+                              {l.detail ? ` — ${l.detail}` : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
+
               <p className="text-[11px] mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-                Formats acceptés : HEIC, HEIF, JPG, JPEG, PNG, WEBP. Les photos HEIC (pellicule iPhone) sont converties automatiquement en JPEG. Vous pouvez sélectionner plusieurs photos à la fois.
+                Formats acceptés : JPG, JPEG, PNG, WEBP, HEIC, HEIF (photos iPhone). Les photos HEIC sont converties automatiquement en JPEG. Vous pouvez sélectionner plusieurs photos à la fois — un fichier n'est jamais refusé uniquement à cause de son type déclaré par le téléphone.
               </p>
             </div>
 
