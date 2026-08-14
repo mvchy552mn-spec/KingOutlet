@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 
+
 /* ============================================================
    LUXURY STREETWEAR — plateforme catalogue premium
    Palette : noir profond #08060D / violet électrique / magenta néon /
@@ -50,12 +51,57 @@ const BRANDS = [
 
 const COLOR_SWATCHES = {
   "Noir": "#111113",
-  "Champagne": "#C9A961",
+  "Blanc": "#F7F6F3",
   "Blanc Cassé": "#EDE9DF",
+  "Gris": "#8A8A90",
   "Gris Ardoise": "#5C5C63",
-  "Bordeaux": "#5C2430",
+  "Gris Clair": "#C3C2C7",
+  "Gris Foncé": "#3A3A40",
+  "Anthracite": "#2B2B31",
+  "Beige": "#D8C9AE",
+  "Crème": "#EFE6D2",
+  "Sable": "#D9C298",
+  "Camel": "#B98246",
+  "Marron": "#5C3A22",
+  "Chocolat": "#3E2517",
+  "Taupe": "#8A7968",
   "Kaki": "#5A5842",
+  "Vert": "#2E6B45",
+  "Vert Olive": "#5C6B32",
+  "Vert Forêt": "#1E3C2A",
+  "Vert Pastel": "#A8CBA6",
+  "Bleu": "#2E5CFF",
+  "Bleu Marine": "#0F2350",
+  "Bleu Ciel": "#8FC7EE",
+  "Bleu Électrique": "#2E8CFF",
+  "Bleu Nuit": "#0A1530",
+  "Rouge": "#C4212C",
+  "Bordeaux": "#5C2430",
+  "Orange": "#E0692E",
+  "Jaune": "#E8C23A",
+  "Jaune Pastel": "#F0E1A0",
+  "Rose": "#E893B4",
+  "Rose Poudré": "#E9C7CE",
+  "Fuchsia": "#E0299A",
+  "Violet": "#7C3FC4",
+  "Lavande": "#C6B6EA",
+  "Argent": "#C7CAD1",
+  "Doré": "#D4AF37",
+  "Champagne": "#C9A961",
+  "Cuivre": "#B36A3E",
+  "Rose Gold": "#E7B7A6",
 };
+
+/* Tailles / pointures selon la catégorie du produit */
+const SIZE_OPTIONS_BY_CATEGORY = {
+  chaussures: Array.from({ length: 48 - 35 + 1 }, (_, i) => String(35 + i)),
+  vetements: ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"],
+  casquettes: ["Unique", "S/M", "L/XL"],
+  accessoires: ["Unique", "S", "M", "L"],
+};
+function sizeOptionsForCategory(categoryId) {
+  return SIZE_OPTIONS_BY_CATEGORY[categoryId] || ["Unique", "XS", "S", "M", "L", "XL"];
+}
 
 const img = (seed, w = 900, h = 1100) => `https://picsum.photos/seed/${seed}/${w}/${h}`;
 
@@ -460,6 +506,75 @@ function TagCorner() {
   );
 }
 
+/* ---------------- Scroll reveal system ----------------
+   Léger, basé sur IntersectionObserver, respecte prefers-reduced-motion,
+   utilise uniquement transform + opacity (perf). Utilisable partout :
+   <Reveal><Section /></Reveal> ou <Reveal delay={80}><Card /></Reveal>
+------------------------------------------------------------- */
+const prefersReducedMotion =
+  typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    : false;
+
+function Reveal({ children, delay = 0, y = 18, blur = true, className = "", as = "div", once = true }) {
+  const ref = useRef(null);
+  const [visible, setVisible] = useState(prefersReducedMotion);
+
+  useEffect(() => {
+    if (prefersReducedMotion) return;
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            if (once) io.unobserve(entry.target);
+          } else if (!once) {
+            setVisible(false);
+          }
+        });
+      },
+      { threshold: 0.14, rootMargin: "0px 0px -8% 0px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [once]);
+
+  const Tag = as;
+  return (
+    <Tag
+      ref={ref}
+      className={className}
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateY(0) scale(1)" : `translateY(${y}px) scale(0.99)`,
+        filter: !prefersReducedMotion && blur ? (visible ? "blur(0px)" : "blur(4px)") : "none",
+        transition: prefersReducedMotion
+          ? "none"
+          : `opacity 0.6s cubic-bezier(0.16,1,0.3,1) ${delay}ms, transform 0.6s cubic-bezier(0.16,1,0.3,1) ${delay}ms, filter 0.5s ease ${delay}ms`,
+        willChange: "opacity, transform",
+      }}
+    >
+      {children}
+    </Tag>
+  );
+}
+
+/* Grille avec stagger automatique : chaque enfant direct reçoit un délai croissant */
+function RevealGroup({ children, step = 70, y = 16, className = "" }) {
+  const items = React.Children.toArray(children);
+  return (
+    <div className={className}>
+      {items.map((child, i) => (
+        <Reveal key={child.key ?? i} delay={i * step} y={y}>
+          {child}
+        </Reveal>
+      ))}
+    </div>
+  );
+}
+
 function Badge({ children, tone = "gold" }) {
   const TONES = {
     gold: { bg: COLORS.gold, color: "#08060D" },
@@ -603,71 +718,191 @@ function Header({ route, go, cartCount }) {
 /* ---------------- Hero ---------------- */
 
 function Hero({ go }) {
+  const wrapRef = useRef(null);
+  const [parallax, setParallax] = useState(0);
+
+  useEffect(() => {
+    if (prefersReducedMotion) return;
+    let raf = null;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        const el = wrapRef.current;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          setParallax(Math.max(-40, Math.min(40, rect.top * -0.06)));
+        }
+        raf = null;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
-    <section className="relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${COLORS.bg} 0%, #150F22 55%, ${COLORS.bg} 100%)` }}>
+    <section
+      ref={wrapRef}
+      className="relative overflow-hidden"
+      style={{
+        background: `linear-gradient(160deg, ${COLORS.bg} 0%, #150F22 55%, ${COLORS.bg} 100%)`,
+      }}
+    >
       <div
         aria-hidden
         className="absolute inset-0 opacity-70"
         style={{
-          background: `radial-gradient(circle at 85% 15%, rgba(255,46,196,0.28), transparent 45%), radial-gradient(circle at 10% 85%, rgba(139,47,232,0.28), transparent 45%), radial-gradient(circle at 50% 50%, rgba(46,140,255,0.10), transparent 60%)`,
+          background: `
+            radial-gradient(circle at 85% 15%, rgba(255,46,196,0.28), transparent 45%),
+            radial-gradient(circle at 10% 85%, rgba(139,47,232,0.28), transparent 45%),
+            radial-gradient(circle at 50% 50%, rgba(46,140,255,0.10), transparent 60%)
+          `,
         }}
       />
-      <div className="max-w-7xl mx-auto px-5 md:px-8 pt-14 pb-16 md:pt-24 md:pb-24 relative grid md:grid-cols-2 gap-10 items-center">
+
+      <div className="max-w-[1600px] mx-auto px-5 md:px-10 pt-12 pb-14 md:pt-20 md:pb-20 relative grid md:grid-cols-[0.95fr_1.15fr] gap-10 md:gap-6 items-center">
+        {/* Texte */}
         <div className="relative z-10">
-          <Eyebrow>Collection permanente</Eyebrow>
-          <h1
-            className="mt-5 leading-[0.95]"
-            style={{ fontFamily: "Anton", fontSize: "clamp(48px, 9vw, 96px)", color: COLORS.ink, letterSpacing: 0.5 }}
-          >
-            LUXURY
-            <br />
-            <span className="neon-text">STREETWEAR</span>
-          </h1>
-          <p className="mt-5 text-base md:text-lg max-w-md" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>
-            Une autre vision du style. Streetwear premium, matières sélectionnées, silhouettes conçues pour durer.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-4">
-            <SolidButton onClick={() => go("catalog")}>Découvrir le catalogue</SolidButton>
-            <GhostButton onClick={() => go("catalog-new")}>Voir les nouveautés</GhostButton>
-          </div>
+          <Reveal><Eyebrow>Collection permanente</Eyebrow></Reveal>
+
+          <Reveal delay={90}>
+            <h1
+              className="mt-5 leading-[0.92]"
+              style={{
+                fontFamily: "Anton",
+                fontSize: "clamp(52px, 10vw, 128px)",
+                color: COLORS.ink,
+                letterSpacing: 0.5,
+              }}
+            >
+              LUXURY
+              <br />
+              <span className="neon-text">STREETWEAR</span>
+            </h1>
+          </Reveal>
+
+          <Reveal delay={180}>
+            <p
+              className="mt-6 text-base md:text-lg max-w-md"
+              style={{
+                fontFamily: "Inter",
+                color: COLORS.inkDim,
+              }}
+            >
+              Une autre vision du style. Streetwear premium, matières
+              sélectionnées, silhouettes conçues pour durer.
+            </p>
+          </Reveal>
+
+          <Reveal delay={270}>
+            <div className="mt-9 flex flex-wrap gap-4">
+              <SolidButton onClick={() => go("catalog")}>
+                Découvrir le catalogue
+              </SolidButton>
+
+              <GhostButton onClick={() => go("catalog-new")}>
+                Voir les nouveautés
+              </GhostButton>
+            </div>
+          </Reveal>
         </div>
 
-        <div className="relative h-[380px] md:h-[520px]">
-          <div className="absolute inset-0 grid grid-cols-2 gap-4">
-            <div className="relative rounded-sm overflow-hidden translate-y-6 neon-border">
-              <img
-              src={
-  c.id === "montres"
-    ? "https://cdn.phototourl.com/free/2026-08-14-4bd52cfe-91d1-4dde-b603-78f9e112d690.png"
-    : img("cat-" + c.id, 500, 650)
-}
-              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))" }} />
-            </div>
-            <div className="relative rounded-sm overflow-hidden -translate-y-6 neon-border">
-              <img src={img("hero-b", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
-              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))" }} />
-            </div>
+        {/* Visuels — grands, dominants, légère composition en profondeur */}
+        <div className="relative h-[440px] sm:h-[520px] md:h-[600px] lg:h-[660px]">
+          <div className="absolute inset-0 grid grid-cols-[1.1fr_0.9fr] gap-3 md:gap-5">
+            {/* Image gauche — dominante */}
+            <Reveal delay={120} y={26} className="relative h-full">
+              <div
+                className="relative rounded-md overflow-hidden h-full neon-border"
+                style={{ transform: `translateY(${parallax * 0.6}px)`, transition: prefersReducedMotion ? "none" : "transform 0.1s linear" }}
+              >
+                <img
+                  src="https://cdn.phototourl.com/free/2026-08-14-4bd52cfe-91d1-4dde-b603-78f9e112d690.png"
+                  alt="Collection LXS"
+                  className="w-full h-full object-cover"
+                  onError={handleImgError}
+                  loading="eager"
+                  decoding="async"
+                />
+                <div
+                  className="absolute inset-0"
+                  style={{ background: "linear-gradient(180deg, transparent 55%, rgba(8,6,13,0.75))" }}
+                />
+              </div>
+            </Reveal>
+
+            {/* Image droite — plan resserré, décalée */}
+            <Reveal delay={220} y={26} className="relative h-full pt-10 md:pt-16">
+              <div
+                className="relative rounded-md overflow-hidden h-full neon-border"
+                style={{ transform: `translateY(${parallax * -0.9}px)`, transition: prefersReducedMotion ? "none" : "transform 0.1s linear" }}
+              >
+                <img
+                  src={img("hero-b", 700, 1000)}
+                  alt="Composition produit"
+                  className="w-full h-full object-cover"
+                  onError={handleImgError}
+                  loading="eager"
+                  decoding="async"
+                />
+                <div
+                  className="absolute inset-0"
+                  style={{ background: "linear-gradient(180deg, transparent 55%, rgba(8,6,13,0.75))" }}
+                />
+              </div>
+            </Reveal>
           </div>
-          <div
-            className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 text-[11px] uppercase tracking-widest font-semibold rounded-sm"
-            style={{ background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`, color: "#08060D", fontFamily: "Inter", boxShadow: `0 0 20px rgba(255,46,196,0.5)` }}
-          >
-            Édition permanente — LXS
-          </div>
+
+          {/* Badge */}
+          <Reveal delay={340} className="absolute -bottom-4 left-1/2 -translate-x-1/2">
+            <div
+              className="px-5 py-2 text-[11px] uppercase tracking-widest font-semibold rounded-sm whitespace-nowrap"
+              style={{
+                background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`,
+                color: "#08060D",
+                fontFamily: "Inter",
+                boxShadow: "0 0 20px rgba(255,46,196,0.5)",
+              }}
+            >
+              Édition permanente — LXS
+            </div>
+          </Reveal>
         </div>
       </div>
 
-      <div className="border-t" style={{ borderColor: COLORS.line }}>
-        <div className="max-w-7xl mx-auto px-5 md:px-8 py-5 grid grid-cols-3 gap-4 text-center">
+      {/* Informations */}
+      <div
+        className="border-t"
+        style={{ borderColor: COLORS.line }}
+      >
+        <div className="max-w-[1600px] mx-auto px-5 md:px-10 py-5 grid grid-cols-3 gap-4 text-center">
           {[
             ["Livraison", "Partout en France"],
             ["Remise en main propre", "Paris & Île-de-France"],
             ["Service client", "7 jours / 7"],
-          ].map(([t, s]) => (
-            <div key={t}>
-              <div className="text-[11px] md:text-xs uppercase tracking-widest font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{t}</div>
-              <div className="text-[10px] md:text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{s}</div>
-            </div>
+          ].map(([t, s], i) => (
+            <Reveal key={t} delay={i * 60} y={10}>
+              <div>
+                <div
+                  className="text-[11px] md:text-xs uppercase tracking-widest font-semibold"
+                  style={{
+                    color: COLORS.ink,
+                    fontFamily: "Inter",
+                  }}
+                >
+                  {t}
+                </div>
+
+                <div
+                  className="text-[10px] md:text-xs mt-1"
+                  style={{
+                    color: COLORS.inkDim,
+                    fontFamily: "Inter",
+                  }}
+                >
+                  {s}
+                </div>
+              </div>
+            </Reveal>
           ))}
         </div>
       </div>
@@ -680,29 +915,37 @@ function Hero({ go }) {
 function CategoryGrid({ go, setCategoryFilter }) {
   return (
     <section className="max-w-7xl mx-auto px-5 md:px-8 py-16">
-      <Eyebrow>Univers</Eyebrow>
-      <h2 className="mt-3 mb-8" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>
-        CATÉGORIES
-      </h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        {CATEGORIES.map((c, i) => (
+      <Reveal><Eyebrow>Univers</Eyebrow></Reveal>
+      <Reveal delay={70}>
+        <h2 className="mt-3 mb-8" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>
+          CATÉGORIES
+        </h2>
+      </Reveal>
+      <RevealGroup className="grid grid-cols-2 md:grid-cols-3 gap-4" step={60} y={20}>
+        {CATEGORIES.map((c) => (
           <button
             key={c.id}
             onClick={() => { setCategoryFilter(c.id); go("catalog"); }}
-            className="relative group text-left overflow-hidden rounded-sm"
+            className="relative group text-left overflow-hidden rounded-md w-full transition-transform duration-300 hover:-translate-y-1"
             style={{ aspectRatio: "3/4" }}
           >
             <img
               src={
-  c.id === "montres"
-    ? "https://gdyavvhquzgvmsckszmi.supabase.co/storage/v1/object/public/product-images/IMG_1086.png"
-    : img("cat-" + c.id, 500, 650)
-}
+                c.id === "montres"
+                  ? "https://gdyavvhquzgvmsckszmi.supabase.co/storage/v1/object/public/product-images/IMG_1086.png"
+                  : img("cat-" + c.id, 500, 650)
+              }
               alt={c.name}
-              className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+              className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
               onError={handleImgError}
+              loading="lazy"
+              decoding="async"
             />
-            <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(8,6,13,0.15) 30%, rgba(8,6,13,0.92))" }} />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(8,6,13,0.1) 30%, rgba(8,6,13,0.92))" }} />
+            <div
+              className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+              style={{ boxShadow: `inset 0 0 0 1px ${COLORS.magenta}66, 0 0 24px rgba(255,46,196,0.25)` }}
+            />
             <TagCorner />
             <div className="absolute top-3 left-3 text-[11px] font-mono" style={{ color: COLORS.magenta }}>{c.tag}</div>
             <div className="absolute bottom-0 p-4">
@@ -711,7 +954,7 @@ function CategoryGrid({ go, setCategoryFilter }) {
             </div>
           </button>
         ))}
-      </div>
+      </RevealGroup>
     </section>
   );
 }
@@ -719,14 +962,40 @@ function CategoryGrid({ go, setCategoryFilter }) {
 /* ---------------- Product card ---------------- */
 
 function ProductCard({ product, brand, onOpen }) {
+  const hasSecondImage = product.images && product.images.length > 1;
   return (
-    <button onClick={() => onOpen(product.id)} className="relative text-left group">
-      <div className="relative overflow-hidden rounded-sm" style={{ background: COLORS.surface, aspectRatio: "3/4" }}>
+    <button onClick={() => onOpen(product.id)} className="relative text-left group w-full">
+      <div
+        className="relative overflow-hidden rounded-md transition-shadow duration-300"
+        style={{
+          background: `radial-gradient(120% 120% at 50% 0%, ${COLORS.surface2} 0%, ${COLORS.surface} 100%)`,
+          aspectRatio: "3/4",
+          boxShadow: `0 0 0 1px ${COLORS.line}`,
+        }}
+      >
         <img
           src={product.images[0]}
           alt={product.name}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className="absolute inset-0 w-full h-full object-cover transition-all duration-500 ease-out group-hover:scale-105"
+          style={{ opacity: hasSecondImage ? 1 : undefined }}
           onError={handleImgError}
+          loading="lazy"
+          decoding="async"
+        />
+        {hasSecondImage && (
+          <img
+            src={product.images[1]}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ease-out opacity-0 group-hover:opacity-100"
+            onError={handleImgError}
+            loading="lazy"
+            decoding="async"
+          />
+        )}
+        <div
+          className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
+          style={{ boxShadow: `inset 0 0 0 1px ${COLORS.magenta}88` }}
         />
         <TagCorner />
         <div className="absolute top-3 left-3 flex gap-2">
@@ -739,10 +1008,27 @@ function ProductCard({ product, brand, onOpen }) {
           </div>
         )}
       </div>
-      <div className="mt-3">
-        <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{brand?.name}</div>
-        <div className="text-sm mt-0.5" style={{ color: COLORS.ink, fontFamily: "Inter", fontWeight: 600 }}>{product.name}</div>
+      <div className="mt-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{brand?.name}</div>
+          {product.price != null && (
+            <div className="text-xs font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{product.price} €</div>
+          )}
+        </div>
+        <div className="text-sm mt-1" style={{ color: COLORS.ink, fontFamily: "Inter", fontWeight: 600 }}>{product.name}</div>
         <div className="text-[11px] mt-0.5 font-mono" style={{ color: COLORS.inkDim }}>{product.reference}</div>
+        {product.colors && product.colors.length > 0 && (
+          <div className="flex items-center gap-1.5 mt-2">
+            {product.colors.slice(0, 5).map((c) => (
+              <span
+                key={c}
+                title={c}
+                className="w-3 h-3 rounded-full"
+                style={{ background: COLOR_SWATCHES[c] || "#444", boxShadow: `0 0 0 1px ${COLORS.line}` }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -907,140 +1193,298 @@ const selectStyle = {
 
 /* ---------------- Product page ---------------- */
 
-function ProductPage({ product, brand, products, brands, onOpen, go }) {
+function ProductGallery({ product }) {
   const [activeImg, setActiveImg] = useState(0);
-  const [selSize, setSelSize] = useState(product.sizes[0] || null);
-  const [selColor, setSelColor] = useState(product.colors[0] || null);
+  const [displayImg, setDisplayImg] = useState(0);
+  const [fading, setFading] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
   const touchStart = useRef(null);
+  const fadeTimeout = useRef(null);
 
-  useEffect(() => { setActiveImg(0); setSelSize(product.sizes[0] || null); setSelColor(product.colors[0] || null); }, [product.id]);
+  useEffect(() => {
+    setActiveImg(0);
+    setDisplayImg(0);
+  }, [product.id]);
 
-  const similar = products.filter((p) => p.id !== product.id && p.categoryId === product.categoryId).slice(0, 4);
+  useEffect(() => {
+    if (displayImg === activeImg) return;
+    setFading(true);
+    fadeTimeout.current && clearTimeout(fadeTimeout.current);
+    fadeTimeout.current = setTimeout(() => {
+      setDisplayImg(activeImg);
+      setFading(false);
+    }, 160);
+    return () => fadeTimeout.current && clearTimeout(fadeTimeout.current);
+  }, [activeImg]);
+
+  const goTo = (i) => setActiveImg(((i % product.images.length) + product.images.length) % product.images.length);
 
   const onTouchStart = (e) => { touchStart.current = e.touches[0].clientX; };
   const onTouchEnd = (e) => {
     if (touchStart.current == null) return;
     const dx = e.changedTouches[0].clientX - touchStart.current;
-    if (dx > 50) setActiveImg((i) => (i - 1 + product.images.length) % product.images.length);
-    if (dx < -50) setActiveImg((i) => (i + 1) % product.images.length);
+    if (dx > 50) goTo(activeImg - 1);
+    if (dx < -50) goTo(activeImg + 1);
     touchStart.current = null;
   };
 
   return (
-    <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
-      <button onClick={() => go("catalog")} className="text-xs uppercase tracking-widest mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-        ← Retour au catalogue
-      </button>
-
-      <div className="grid md:grid-cols-2 gap-10">
-        <div>
-          <div
-            className="relative rounded-sm overflow-hidden"
-            style={{ background: COLORS.surface, aspectRatio: "4/5" }}
-            onTouchStart={onTouchStart}
-            onTouchEnd={onTouchEnd}
-          >
-            <img
-              src={product.images[activeImg]}
-              alt={product.name}
-              className="w-full h-full object-cover transition-opacity duration-300"
-              onError={handleImgError}
-            />
-            <TagCorner />
-            <div className="absolute top-3 left-3 flex gap-2">
-              {product.isNew && <Badge tone="new">Nouveau</Badge>}
-              {product.featured && <Badge tone="dark">En avant</Badge>}
-            </div>
-          </div>
-          <div className="flex gap-3 mt-4 overflow-x-auto pb-1">
-            {product.images.map((im, i) => (
-              <button
-                key={i}
-                onClick={() => setActiveImg(i)}
-                className="shrink-0 rounded-sm overflow-hidden"
-                style={{ width: 72, height: 90, outline: activeImg === i ? `2px solid ${COLORS.magenta}` : `1px solid ${COLORS.line}` }}
-              >
-                <img src={im} alt="" className="w-full h-full object-cover" onError={handleImgError} />
-              </button>
-            ))}
-          </div>
+    <div>
+      {/* Image principale — cadre premium, produit dominant, fond propre */}
+      <div
+        className="relative rounded-lg overflow-hidden cursor-zoom-in select-none"
+        style={{
+          aspectRatio: "4/5",
+          background: `radial-gradient(120% 100% at 50% 8%, ${COLORS.surface2} 0%, ${COLORS.surface} 55%, #0C0913 100%)`,
+          boxShadow: `0 0 0 1px ${COLORS.line}, 0 30px 60px -30px rgba(0,0,0,0.7)`,
+        }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onClick={() => setZoomOpen(true)}
+      >
+        <div className="absolute inset-0 flex items-center justify-center p-6 sm:p-10">
+          <img
+            src={product.images[displayImg]}
+            alt={product.name}
+            className="max-w-full max-h-full w-auto h-auto object-contain drop-shadow-[0_25px_40px_rgba(0,0,0,0.55)] transition-all duration-300 ease-out"
+            style={{ opacity: fading ? 0 : 1, transform: fading ? "scale(0.985)" : "scale(1)" }}
+            onError={handleImgError}
+            loading="eager"
+            decoding="async"
+          />
         </div>
-
-        <div>
-          <div className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{brand?.name}</div>
-          <h1 className="mt-2" style={{ fontFamily: "Anton", fontSize: "clamp(28px,4vw,40px)", color: COLORS.ink }}>{product.name.toUpperCase()}</h1>
-          <div className="mt-2 text-xs font-mono" style={{ color: COLORS.inkDim }}>Réf. {product.reference}</div>
-
-          <p className="mt-5 text-sm leading-relaxed max-w-md" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{product.description}</p>
-
-          {product.colors.length > 0 && (
-            <div className="mt-6">
-              <div className="text-[11px] uppercase tracking-widest mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleur — {selColor}</div>
-              <div className="flex gap-2">
-                {product.colors.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setSelColor(c)}
-                    className="w-8 h-8 rounded-full"
-                    style={{ background: COLOR_SWATCHES[c] || "#444", outline: selColor === c ? `2px solid ${COLORS.magenta}` : `1px solid ${COLORS.line}`, outlineOffset: 2 }}
-                    aria-label={c}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {product.sizes.length > 0 && (
-            <div className="mt-6">
-              <div className="text-[11px] uppercase tracking-widest mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Taille</div>
-              <div className="flex flex-wrap gap-2">
-                {product.sizes.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setSelSize(s)}
-                    className="px-4 py-2 text-sm rounded-sm"
-                    style={{
-                      border: `1px solid ${selSize === s ? COLORS.magenta : COLORS.line}`,
-                      color: selSize === s ? COLORS.magenta : COLORS.ink,
-                      fontFamily: "Inter",
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-6 text-sm" style={{ fontFamily: "Inter" }}>
-            {product.availability ? (
-              <span style={{ color: COLORS.green }}>● Disponible</span>
-            ) : (
-              <span style={{ color: "#FF5C7A" }}>● Rupture de stock</span>
-            )}
+        <TagCorner />
+        <div className="absolute top-3 left-3 flex gap-2">
+          {product.isNew && <Badge tone="new">Nouveau</Badge>}
+          {product.featured && <Badge tone="dark">En avant</Badge>}
+        </div>
+        {product.images.length > 1 && (
+          <div
+            className="absolute bottom-3 right-3 px-2.5 py-1 rounded-sm text-[10px] font-mono"
+            style={{ background: "rgba(8,6,13,0.65)", color: COLORS.inkDim }}
+          >
+            {displayImg + 1} / {product.images.length}
           </div>
-
-          <div className="mt-8 flex flex-wrap gap-4">
-            <SolidButton onClick={() => go("contact")}>Nous contacter pour ce produit</SolidButton>
-            <GhostButton onClick={() => go("catalog")}>Continuer à explorer</GhostButton>
-          </div>
-
-          <div className="mt-8 pt-8 border-t text-sm space-y-1" style={{ borderColor: COLORS.line, fontFamily: "Inter", color: COLORS.inkDim }}>
-            <div>Catégorie : {CATEGORIES.find((c) => c.id === product.categoryId)?.name}</div>
-            <div>Marque : {brand?.name}</div>
-          </div>
+        )}
+        <div
+          className="absolute bottom-3 left-3 px-2.5 py-1 rounded-sm text-[10px] uppercase tracking-widest hidden sm:flex items-center gap-1"
+          style={{ background: "rgba(8,6,13,0.55)", color: COLORS.inkDim, fontFamily: "Inter" }}
+        >
+          ⤢ Cliquer pour zoomer
         </div>
       </div>
 
+      {/* Miniatures — indicateur discret, pas de gros contour */}
+      {product.images.length > 1 && (
+        <div className="flex gap-2.5 mt-4 overflow-x-auto pb-1">
+          {product.images.map((im, i) => (
+            <button
+              key={i}
+              onClick={() => goTo(i)}
+              className="relative shrink-0 rounded-md overflow-hidden transition-all duration-200"
+              style={{
+                width: 64,
+                height: 80,
+                background: COLORS.surface,
+                boxShadow: activeImg === i ? `0 0 0 2px ${COLORS.magenta}, 0 0 14px rgba(255,46,196,0.4)` : `0 0 0 1px ${COLORS.line}`,
+                opacity: activeImg === i ? 1 : 0.6,
+              }}
+            >
+              <img src={im} alt="" className="w-full h-full object-cover" onError={handleImgError} loading="lazy" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {zoomOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 sm:p-10"
+          style={{ background: "rgba(5,4,9,0.94)" }}
+          onClick={() => setZoomOpen(false)}
+        >
+          <button
+            onClick={() => setZoomOpen(false)}
+            className="absolute top-4 right-4 sm:top-6 sm:right-6 w-10 h-10 rounded-full flex items-center justify-center text-lg"
+            style={{ background: COLORS.surface2, color: COLORS.ink }}
+            aria-label="Fermer le zoom"
+          >
+            ✕
+          </button>
+          <img
+            src={product.images[displayImg]}
+            alt={product.name}
+            className="max-w-full max-h-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+            onError={handleImgError}
+          />
+          {product.images.length > 1 && (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); goTo(activeImg - 1); }}
+                className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: "rgba(255,255,255,0.08)", color: COLORS.ink }}
+                aria-label="Image précédente"
+              >‹</button>
+              <button
+                onClick={(e) => { e.stopPropagation(); goTo(activeImg + 1); }}
+                className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: "rgba(255,255,255,0.08)", color: COLORS.ink }}
+                aria-label="Image suivante"
+              >›</button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductPage({ product, brand, products, brands, onOpen, go }) {
+  const [selSize, setSelSize] = useState(product.sizes[0] || null);
+  const [selColor, setSelColor] = useState(product.colors[0] || null);
+
+  useEffect(() => { setSelSize(product.sizes[0] || null); setSelColor(product.colors[0] || null); }, [product.id]);
+
+  const similar = products.filter((p) => p.id !== product.id && p.categoryId === product.categoryId).slice(0, 4);
+  const categoryLabel = CATEGORIES.find((c) => c.id === product.categoryId)?.name;
+  const isShoe = product.categoryId === "chaussures";
+
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
+      <button onClick={() => go("catalog")} className="text-xs uppercase tracking-widest mb-6 inline-flex items-center gap-1.5" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        ← Retour au catalogue
+      </button>
+
+      <div className="grid md:grid-cols-2 gap-10 lg:gap-16">
+        {/* Galerie — dominante */}
+        <Reveal y={22}>
+          <ProductGallery product={product} />
+        </Reveal>
+
+        {/* Informations — structure éditoriale */}
+        <Reveal delay={120} y={22}>
+          <div>
+            <div className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{brand?.name}</div>
+            <h1 className="mt-2 leading-tight" style={{ fontFamily: "Anton", fontSize: "clamp(30px,4vw,44px)", color: COLORS.ink }}>{product.name.toUpperCase()}</h1>
+            <div className="mt-2 flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-mono" style={{ color: COLORS.inkDim }}>Réf. {product.reference}</span>
+              {product.price != null && (
+                <span className="text-lg font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{product.price} €</span>
+              )}
+              <span className="text-xs" style={{ fontFamily: "Inter" }}>
+                {product.availability
+                  ? <span style={{ color: COLORS.green }}>● Disponible</span>
+                  : <span style={{ color: "#FF5C7A" }}>● Rupture de stock</span>}
+              </span>
+            </div>
+
+            {product.description && (
+              <p className="mt-6 text-sm leading-relaxed max-w-md" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{product.description}</p>
+            )}
+
+            {product.colors.length > 0 && (
+              <div className="mt-7 pt-6 border-t" style={{ borderColor: COLORS.line }}>
+                <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                  Couleur <span style={{ color: COLORS.ink }}>— {selColor}</span>
+                </div>
+                <div className="flex gap-2.5 flex-wrap">
+                  {product.colors.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setSelColor(c)}
+                      className="w-9 h-9 rounded-full transition-transform duration-150 hover:scale-110"
+                      style={{
+                        background: COLOR_SWATCHES[c] || "#444",
+                        boxShadow: selColor === c ? `0 0 0 2px ${COLORS.bg}, 0 0 0 4px ${COLORS.magenta}, 0 0 12px rgba(255,46,196,0.5)` : `0 0 0 1px ${COLORS.line}`,
+                      }}
+                      aria-label={c}
+                      title={c}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {product.sizes.length > 0 && (
+              <div className="mt-6 pt-6 border-t" style={{ borderColor: COLORS.line }}>
+                <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                  {isShoe ? "Pointure" : "Taille"}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {product.sizes.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSelSize(s)}
+                      className="min-w-[46px] px-3 py-2.5 text-sm rounded-sm transition-all duration-150"
+                      style={{
+                        border: `1px solid ${selSize === s ? COLORS.magenta : COLORS.line}`,
+                        background: selSize === s ? "rgba(255,46,196,0.08)" : "transparent",
+                        color: selSize === s ? COLORS.magenta : COLORS.ink,
+                        fontFamily: "Inter",
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-8 flex flex-wrap gap-4">
+              <SolidButton
+                onClick={() => go("contact")}
+                className="!px-8 !py-4 !text-base tracking-wider"
+              >
+                Nous contacter pour ce produit
+              </SolidButton>
+              <GhostButton onClick={() => go("catalog")}>Continuer à explorer</GhostButton>
+            </div>
+
+            {/* Réassurance */}
+            <div className="mt-8 pt-6 border-t grid grid-cols-3 gap-3 text-center" style={{ borderColor: COLORS.line }}>
+              {[
+                ["🚚", "Livraison", "Partout en France"],
+                ["🤝", "Main propre", "Paris & IDF"],
+                ["💬", "Service client", "7j/7"],
+              ].map(([icon, t, s]) => (
+                <div key={t}>
+                  <div className="text-base">{icon}</div>
+                  <div className="text-[10px] uppercase tracking-widest font-semibold mt-1" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{t}</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{s}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Informations complémentaires */}
+            <div className="mt-6 pt-6 border-t text-sm space-y-2" style={{ borderColor: COLORS.line, fontFamily: "Inter" }}>
+              <div className="flex justify-between">
+                <span style={{ color: COLORS.inkDim }}>Catégorie</span>
+                <span style={{ color: COLORS.ink }}>{categoryLabel}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: COLORS.inkDim }}>Marque</span>
+                <span style={{ color: COLORS.ink }}>{brand?.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: COLORS.inkDim }}>Authenticité</span>
+                <span style={{ color: COLORS.ink }}>Garantie</span>
+              </div>
+            </div>
+          </div>
+        </Reveal>
+      </div>
+
       {similar.length > 0 && (
-        <div className="mt-20">
-          <Eyebrow>Vous aimerez aussi</Eyebrow>
-          <h2 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: 28, color: COLORS.ink }}>PRODUITS SIMILAIRES</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+        <div className="mt-24">
+          <Reveal><Eyebrow>Vous aimerez aussi</Eyebrow></Reveal>
+          <Reveal delay={70}>
+            <h2 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: 28, color: COLORS.ink }}>PRODUITS SIMILAIRES</h2>
+          </Reveal>
+          <RevealGroup className="grid grid-cols-2 md:grid-cols-4 gap-5" step={60} y={18}>
             {similar.map((p) => (
               <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={onOpen} />
             ))}
-          </div>
+          </RevealGroup>
         </div>
       )}
     </section>
@@ -1754,20 +2198,75 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
             </div>
 
             <div>
-              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Tailles</label>
-              <div className="flex flex-wrap gap-2">
-                {["Unique", "38", "39", "40", "41", "42", "43", "44", "45", "XS", "S", "M", "L", "XL"].map((s) => (
-                  <button key={s} type="button" onClick={() => toggleListValue("sizes", s)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.sizes.includes(s) ? COLORS.magenta : COLORS.line}`, color: editing.sizes.includes(s) ? COLORS.magenta : COLORS.ink }}>{s}</button>
+              <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                {editing.categoryId === "chaussures" ? "Pointures" : "Tailles"}
+              </label>
+              <select
+                className="w-full px-3 py-2 text-sm rounded-sm"
+                style={selectStyle}
+                value=""
+                onChange={(e) => { if (e.target.value) toggleListValue("sizes", e.target.value); e.target.value = ""; }}
+              >
+                <option value="">
+                  {editing.categoryId
+                    ? `+ Ajouter une ${editing.categoryId === "chaussures" ? "pointure" : "taille"}…`
+                    : "Choisissez d'abord une catégorie…"}
+                </option>
+                {sizeOptionsForCategory(editing.categoryId).map((s) => (
+                  <option key={s} value={s} disabled={editing.sizes.includes(s)}>
+                    {s}{editing.sizes.includes(s) ? " ✓" : ""}
+                  </option>
                 ))}
-              </div>
+              </select>
+              {editing.sizes.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2.5">
+                  {editing.sizes.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => toggleListValue("sizes", s)}
+                      className="px-3 py-1.5 text-xs rounded-sm flex items-center gap-1.5"
+                      style={{ border: `1px solid ${COLORS.magenta}`, color: COLORS.magenta, fontFamily: "Inter" }}
+                      title="Retirer"
+                    >
+                      {s} <span aria-hidden>✕</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleurs</label>
-              <div className="flex flex-wrap gap-2">
+              <select
+                className="w-full px-3 py-2 text-sm rounded-sm"
+                style={selectStyle}
+                value=""
+                onChange={(e) => { if (e.target.value) toggleListValue("colors", e.target.value); e.target.value = ""; }}
+              >
+                <option value="">+ Ajouter une couleur…</option>
                 {Object.keys(COLOR_SWATCHES).map((c) => (
-                  <button key={c} type="button" onClick={() => toggleListValue("colors", c)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.colors.includes(c) ? COLORS.magenta : COLORS.line}`, color: editing.colors.includes(c) ? COLORS.magenta : COLORS.ink }}>{c}</button>
+                  <option key={c} value={c} disabled={editing.colors.includes(c)}>
+                    {c}{editing.colors.includes(c) ? " ✓" : ""}
+                  </option>
                 ))}
-              </div>
+              </select>
+              {editing.colors.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2.5">
+                  {editing.colors.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => toggleListValue("colors", c)}
+                      className="pl-1.5 pr-2.5 py-1 text-xs rounded-full flex items-center gap-1.5"
+                      style={{ border: `1px solid ${COLORS.line}`, color: COLORS.ink, fontFamily: "Inter" }}
+                      title="Retirer"
+                    >
+                      <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: COLOR_SWATCHES[c] || "#444" }} />
+                      {c} <span aria-hidden>✕</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="sm:col-span-2 flex flex-wrap gap-6 pt-2">
@@ -1922,7 +2421,7 @@ function Footer({ go }) {
 
 const STORAGE_KEY = "luxury-streetwear-catalog-data";
 
-export default function App() {
+function App() {
   const [route, setRoute] = useState("home");
   // Supabase est la source de vérité pour les produits : on démarre à vide
   // (pas de INITIAL_PRODUCTS ici) et on affiche un état de chargement le
@@ -2069,6 +2568,15 @@ export default function App() {
           50% { opacity: 0.72; }
         }
         .neon-pulse { animation: neonPulse 2.4s ease-in-out infinite; }
+
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.001ms !important;
+            scroll-behavior: auto !important;
+          }
+        }
       `}</style>
 
       <Header route={route} go={go} />
@@ -2079,31 +2587,35 @@ export default function App() {
           <CategoryGrid go={go} setCategoryFilter={setCategoryFilter} />
           <section className="max-w-7xl mx-auto px-5 md:px-8 pb-16">
             <div className="flex items-end justify-between mb-6">
-              <div>
-                <Eyebrow>Nouveautés</Eyebrow>
-                <h2 className="mt-3" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>DERNIÈRES ARRIVÉES</h2>
-              </div>
+              <Reveal>
+                <div>
+                  <Eyebrow>Nouveautés</Eyebrow>
+                  <h2 className="mt-3" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>DERNIÈRES ARRIVÉES</h2>
+                </div>
+              </Reveal>
               <GhostButton onClick={() => go("catalog-new")}>Voir tout</GhostButton>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+            <RevealGroup className="grid grid-cols-2 md:grid-cols-4 gap-5" step={70} y={20}>
               {products.filter((p) => p.isNew).slice(0, 4).map((p) => (
                 <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={openProduct} />
               ))}
-            </div>
+            </RevealGroup>
           </section>
           <section className="max-w-7xl mx-auto px-5 md:px-8 pb-20">
             <div className="flex items-end justify-between mb-6">
-              <div>
-                <Eyebrow>Sélection</Eyebrow>
-                <h2 className="mt-3" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>PIÈCES SIGNATURE</h2>
-              </div>
+              <Reveal>
+                <div>
+                  <Eyebrow>Sélection</Eyebrow>
+                  <h2 className="mt-3" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>PIÈCES SIGNATURE</h2>
+                </div>
+              </Reveal>
               <GhostButton onClick={() => go("collections")}>Voir tout</GhostButton>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+            <RevealGroup className="grid grid-cols-2 md:grid-cols-4 gap-5" step={70} y={20}>
               {products.filter((p) => p.featured).slice(0, 4).map((p) => (
                 <ProductCard key={p.id} product={p} brand={brands.find((b) => b.id === p.brandId)} onOpen={openProduct} />
               ))}
-            </div>
+            </RevealGroup>
           </section>
         </>
       )}
