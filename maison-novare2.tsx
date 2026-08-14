@@ -105,7 +105,7 @@ const SUPABASE_BUCKET = "product-images";
 // après avoir créé votre utilisateur admin (voir instructions en fin
 // de réponse), puis collez-le ici tel quel.
 // ============================================================
-const ADMIN_USER_ID = "REPLACE_WITH_YOUR_ADMIN_UUID";
+const ADMIN_USER_ID = "2c315c76-b4f2-4ce9-9ee2-91c8f4896dd0";
 
 // -------- Chargement paresseux du SDK Supabase (@supabase/supabase-js) --------
 // Nécessaire pour Supabase Auth (signInWithPassword, getSession, onAuthStateChange,
