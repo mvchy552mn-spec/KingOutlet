@@ -1,26 +1,31 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 
 /* ============================================================
-   MAISON NOVARE — plateforme catalogue premium
-   Palette : noir #0B0B0C / blanc cassé #F3F1EA / champagne #C9A961
-             graphite #17171A / bronze #7A6A48
-   Display : "Anton" (titres XXL) — Body : "Inter" — Mono : "IBM Plex Mono" (référence produit)
-   Signature : étiquette diagonale "tag de vêtement" utilisée comme motif structurel
+   LUXURY STREETWEAR — plateforme catalogue premium
+   Palette : noir profond #08060D / violet électrique / magenta néon /
+             vert fluo / bleu électrique / touches dorées
+   Display : "Anton" (titres XXL, avec effet néon en dégradé) — Body : "Inter"
+   Mono : "IBM Plex Mono" (référence produit)
    ============================================================ */
 
 const FONT_IMPORT = `
-@import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500&display=swap');
 `;
 
 const COLORS = {
-  bg: "#0B0B0C",
-  surface: "#17171A",
-  surface2: "#1F1F23",
-  line: "#2B2B30",
-  ink: "#F3F1EA",
-  inkDim: "#A9A69C",
-  gold: "#C9A961",
-  goldDim: "#8C7A54",
+  bg: "#08060D",
+  surface: "#120E1C",
+  surface2: "#1B1428",
+  line: "#33264A",
+  ink: "#F5F3FF",
+  inkDim: "#B6AFC9",
+  gold: "#E8C25E",
+  goldDim: "#B99A3F",
+  purple: "#8B2FE8",
+  purpleDim: "#5C1FA0",
+  magenta: "#FF2EC4",
+  green: "#39FF8C",
+  blue: "#2E8CFF",
 };
 
 /* ---------------- Demo data (fictitious brands, placeholder imagery) ---------------- */
@@ -35,7 +40,7 @@ const CATEGORIES = [
 ];
 
 const BRANDS = [
-  { id: "novare-originals", name: "Novare Originals", description: "La ligne cœur de Maison Novare — silhouettes signature et pièces intemporelles." },
+  { id: "novare-originals", name: "Novare Originals", description: "La ligne cœur de Luxury Streetwear — silhouettes signature et pièces intemporelles." },
   { id: "atelier-noir", name: "Atelier Noir", description: "Façon artisanale, teintes profondes, coupes précises." },
   { id: "urban-forge", name: "Urban Forge", description: "Streetwear technique pensé pour la ville." },
   { id: "blackout-lab", name: "Blackout Lab", description: "Recherche matière et éditions limitées." },
@@ -54,9 +59,6 @@ const COLOR_SWATCHES = {
 
 const img = (seed, w = 900, h = 1100) => `https://picsum.photos/seed/${seed}/${w}/${h}`;
 
-/* Fallback shown whenever an <img> fails to load (broken URL, blocked hotlinking,
-   wrong domain, etc). Swaps the src instead of leaving a broken-image icon so the
-   admin and the visitor both get a clear, on-brand signal. */
 const BROKEN_IMAGE_FALLBACK =
   "data:image/svg+xml;charset=UTF-8," +
   encodeURIComponent(
@@ -68,7 +70,6 @@ const BROKEN_IMAGE_FALLBACK =
   );
 
 function handleImgError(e) {
-  // avoid infinite loop if the fallback itself somehow errors
   e.currentTarget.onerror = null;
   e.currentTarget.src = BROKEN_IMAGE_FALLBACK;
 }
@@ -107,12 +108,6 @@ const SUPABASE_BUCKET = "product-images";
 // ============================================================
 const ADMIN_USER_ID = "2c315c76-b4f2-4ce9-9ee2-91c8f4896dd0";
 
-// -------- Chargement paresseux du SDK Supabase (@supabase/supabase-js) --------
-// Nécessaire pour Supabase Auth (signInWithPassword, getSession, onAuthStateChange,
-// persistance de session). Comme heic2any, ce SDK n'est pas pré-importable dans cet
-// environnement d'artifact : on le charge dynamiquement via un <script> UMD, une
-// seule fois, et on le met en cache. Dans le fichier index.html autonome, il est
-// préchargé dans le <head> — ici on le détecte s'il est déjà présent.
 let supabaseSdkLoadingPromise = null;
 function loadSupabaseSdk() {
   if (typeof window !== "undefined" && window.supabase && typeof window.supabase.createClient === "function") {
@@ -130,8 +125,6 @@ function loadSupabaseSdk() {
   return supabaseSdkLoadingPromise;
 }
 
-// Client Supabase Auth, mis en cache (un seul client pour toute l'app,
-// avec persistance de session dans localStorage + rafraîchissement auto du token).
 let supabaseAuthClient = null;
 async function getSupabaseAuthClient() {
   if (supabaseAuthClient) return supabaseAuthClient;
@@ -142,12 +135,6 @@ async function getSupabaseAuthClient() {
   return supabaseAuthClient;
 }
 
-// -------- Vérification admin côté client, à appeler AVANT toute opération --------
-// sensible (upload photo, suppression photo, sauvegarde produit). Ne fait jamais
-// confiance à un état local mis en cache : interroge Supabase pour connaître
-// l'utilisateur réellement authentifié à cet instant, puis compare son UUID à
-// ADMIN_USER_ID. Renvoie { user, accessToken } si tout est en ordre, sinon lève
-// une erreur avec un message explicite (affiché tel quel dans l'UI/le journal).
 async function requireAdmin() {
   const client = await getSupabaseAuthClient();
   const { data: userData, error: userError } = await client.auth.getUser();
@@ -164,9 +151,6 @@ async function requireAdmin() {
   return { user: userData.user, accessToken: sessionData.session.access_token };
 }
 
-// Formats acceptés dans le sélecteur de fichiers et lors de l'upload.
-// HEIC/HEIF (format par défaut des photos iPhone) sont convertis en JPEG
-// côté navigateur avant l'envoi vers Supabase — voir convertHeicIfNeeded().
 const ACCEPTED_IMAGE_TYPES = [
   "image/jpeg", "image/jpg", "image/png", "image/webp",
   "image/heic", "image/heif",
@@ -176,75 +160,40 @@ const EXT_BY_MIME = {
   "image/heic": "heic", "image/heif": "heif",
 };
 
-// L'attribut "accept" du <input type="file"> : on liste les types MIME connus,
-// les extensions, ET "image/*" en filet de sécurité, car iOS ne renseigne pas
-// toujours file.type correctement pour le HEIC/HEIF ou certains partages —
-// ainsi la pellicule et l'app Fichiers proposent bien toutes les photos.
 const FILE_INPUT_ACCEPT =
   "image/*,image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif";
 
-// -------- Détection du type réel d'un fichier par sa signature binaire --------
-// file.type est déclaré par le NAVIGATEUR/OS, pas garanti : sur iOS (Safari,
-// app Fichiers, partages tiers), il arrive vide ("") ou générique
-// ("application/octet-stream") même pour un JPG ou PNG parfaitement valide.
-// On ne doit donc JAMAIS bloquer un fichier uniquement parce que file.type
-// est vide — on vérifie plutôt les premiers octets réels du fichier
-// ("magic bytes"), qui ne mentent jamais sur le format.
 async function detectRealImageType(file) {
   try {
     const buf = await file.slice(0, 12).arrayBuffer();
     const b = new Uint8Array(buf);
-
-    // JPEG: FF D8 FF
     if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
-    // PNG: 89 50 4E 47 0D 0A 1A 0A
     if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
-    // WEBP: "RIFF"...."WEBP"
     if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) return "image/webp";
-    // HEIC/HEIF (ISOBMFF): octets 4-11 = "ftyp" + marque
     const ascii = String.fromCharCode(...b.slice(4, 12));
     if (ascii.startsWith("ftyp") && /heic|heix|hevc|hevx|mif1|msf1/.test(ascii)) return "image/heic";
   } catch {
-    // lecture binaire impossible → on retombe sur file.type plus bas
   }
   return null;
 }
 
-// -------- Détection HEIC/HEIF fiable --------
-// Sur iPhone/Safari, un fichier de la pellicule peut arriver avec file.type
-// vide ("") ou générique ("application/octet-stream"), même si son contenu
-// réel est du HEIC. On ne peut donc PAS se fier uniquement à file.type ni au
-// nom du fichier (ex: "IMG_1234" n'est pas une extension, juste un nom).
-// On vérifie donc en plus la signature binaire réelle du fichier (les
-// premiers octets, "magic bytes"), qui ne mentent jamais sur le format.
 async function isHeicFile(file) {
   const type = (file.type || "").toLowerCase();
   if (type === "image/heic" || type === "image/heif") return true;
-
   const name = (file.name || "").toLowerCase();
   const looksHeicByName = name.endsWith(".heic") || name.endsWith(".heif");
-
   const realType = await detectRealImageType(file);
   if (realType === "image/heic") return true;
-  if (realType) return false; // signature détectée et ce n'est PAS du HEIC → certitude
-
-  return looksHeicByName; // aucune signature reconnue, on se rabat sur le nom
+  if (realType) return false;
+  return looksHeicByName;
 }
 
-// -------- Chargement paresseux de la librairie de conversion HEIC --------
-// heic2any n'est pas dans les librairies pré-importables de cet environnement.
-// Dans le fichier index.html autonome, la librairie est préchargée via une
-// balise <script src="..."> dans le <head> ; ici, on l'injecte dynamiquement
-// au moment où on en a réellement besoin (première photo HEIC sélectionnée),
-// et on la met en cache pour ne la charger qu'une seule fois. Si le script
-// est déjà présent (cas du index.html), on le détecte et on ne recharge rien.
 let heic2anyLoadingPromise = null;
 function loadHeic2any() {
   if (typeof window !== "undefined" && typeof window.heic2any === "function") {
     return Promise.resolve();
   }
   if (heic2anyLoadingPromise) return heic2anyLoadingPromise;
-
   heic2anyLoadingPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
@@ -256,16 +205,9 @@ function loadHeic2any() {
   return heic2anyLoadingPromise;
 }
 
-// -------- Conversion HEIC/HEIF → JPEG côté navigateur --------
-// Le navigateur ne sait pas afficher ni encoder du HEIC via <img>/<canvas>,
-// donc on utilise la librairie "heic2any" (préchargée dans index.html, ou
-// chargée à la demande via loadHeic2any() sinon). La conversion se fait AVANT l'upload,
-// afin que Supabase Storage ne reçoive que du JPEG, directement affichable
-// partout (iPhone, Android, ordinateur, tous navigateurs).
 async function convertHeicIfNeeded(file) {
   const heic = await isHeicFile(file);
   if (!heic) return file;
-
   try {
     await loadHeic2any();
   } catch (err) {
@@ -274,21 +216,16 @@ async function convertHeicIfNeeded(file) {
   if (typeof window.heic2any !== "function") {
     throw new Error("Conversion HEIC indisponible (librairie non chargée)");
   }
-
   const convertedBlob = await window.heic2any({
     blob: file,
     toType: "image/jpeg",
-    quality: 0.9, // bonne qualité visuelle, taille de fichier raisonnable
+    quality: 0.9,
   });
-  // heic2any peut renvoyer un tableau de blobs pour les HEIC "live photo" à
-  // plusieurs images ; on ne garde que la première pour la photo produit.
   const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
-
   const originalName = (file.name || "photo").replace(/\.(heic|heif)$/i, "");
   return new File([blob], `${originalName}.jpg`, { type: "image/jpeg" });
 }
 
-// Libellés affichés dans le panneau de debug pour chaque étape de la chaîne d'upload.
 const STEP_LABELS = {
   selection: "Sélection du fichier",
   conversion: "Conversion",
@@ -303,44 +240,20 @@ function makeStoragePath(realType) {
   return `admin/${Date.now()}-${rand}.${ext}`;
 }
 
-// Upload réel vers Supabase Storage (bucket "product-images").
-// Convertit d'abord le fichier s'il s'agit d'un HEIC/HEIF, puis upload.
-// IMPORTANT : ne rejette JAMAIS un fichier uniquement parce que file.type
-// (déclaré par le navigateur) est vide ou générique — on se base sur le
-// contenu réel du fichier (signature binaire) pour décider, et un fichier
-// est refusé seulement si sa signature ne correspond à AUCUN format image
-// connu (JPEG/PNG/WEBP/HEIC) ET que son nom ne laisse rien deviner non plus.
-//
-// Renvoie { publicUrl, path, steps } où "steps" trace chaque étape pour le
-// panneau de debug (voir DEBUG SYSTEM plus bas) : "selection", "conversion",
-// "connexion", "upload", "url".
-//
-// accessToken : le jeton de session Supabase Auth de l'administrateur connecté
-// (obtenu via requireAdmin()). L'upload est envoyé authentifié avec CE jeton
-// (Authorization: Bearer <access_token>), et non plus avec la clé publique —
-// c'est ce qui permet aux policies RLS Storage de vérifier auth.uid().
 async function uploadToSupabase(file, accessToken, onStep) {
   const trace = (step, ok, detail) => onStep && onStep(step, ok, detail);
-
   if (!accessToken) {
     trace("connexion", false, "Vous devez être connecté en tant qu'administrateur.");
     throw new Error("Vous devez être connecté en tant qu'administrateur.");
   }
-
   trace("selection", true, `${file.name || "(sans nom)"} — type déclaré: "${file.type || "(vide)"}"`);
-
-  // Étape 1 - Déterminer le type réel du fichier à partir de son contenu, pas de
-  //    file.type (qui peut être vide/faux sur iOS).
   const realType = await detectRealImageType(file);
   const looksHeicByName = /\.(heic|heif)$/i.test(file.name || "");
   const effectiveType = realType || (ACCEPTED_IMAGE_TYPES.includes(file.type) ? file.type : null);
-
   if (!effectiveType && !looksHeicByName) {
     trace("conversion", false, "Signature binaire non reconnue comme image (JPEG/PNG/WEBP/HEIC)");
     throw new Error("Ce fichier ne semble pas être une image supportée");
   }
-
-  // Étape 2 - Conversion HEIC → JPEG si nécessaire.
   let usableFile = file;
   const isHeic = effectiveType === "image/heic" || (!realType && looksHeicByName);
   if (isHeic) {
@@ -352,20 +265,14 @@ async function uploadToSupabase(file, accessToken, onStep) {
       throw err;
     }
   } else {
-    // Fichier déjà dans un format web standard : on force le type MIME réel
-    // sur l'objet File envoyé à Supabase, au cas où file.type était vide,
-    // pour que le fichier stocké ait un Content-Type correct.
     usableFile = effectiveType && effectiveType !== file.type
       ? new File([file], file.name || "photo", { type: effectiveType })
       : file;
     trace("conversion", true, "Aucune conversion nécessaire");
   }
-
   const finalType = usableFile.type || effectiveType || "image/jpeg";
   const path = makeStoragePath(finalType);
   const uploadUrl = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`;
-
-  // Étape 3 - Upload effectif vers Supabase Storage.
   let res;
   try {
     res = await fetch(uploadUrl, {
@@ -382,12 +289,8 @@ async function uploadToSupabase(file, accessToken, onStep) {
     trace("connexion", false, `Requête réseau impossible vers Supabase : ${networkErr.message || networkErr}`);
     throw new Error(`Connexion à Supabase impossible : ${networkErr.message || networkErr}`);
   }
-
   trace("connexion", true, `Réponse reçue du serveur Supabase (HTTP ${res.status})`);
-
   if (!res.ok) {
-    // On récupère le VRAI message d'erreur renvoyé par Supabase (JSON avec
-    // souvent { statusCode, error, message }), plutôt qu'un texte générique.
     let detail = `HTTP ${res.status}`;
     try {
       const body = await res.json();
@@ -399,17 +302,11 @@ async function uploadToSupabase(file, accessToken, onStep) {
     throw new Error(`Upload Supabase Storage échoué (${res.status}) : ${detail}`);
   }
   trace("upload", true, `Fichier stocké sous ${SUPABASE_BUCKET}/${path}`);
-
-  // Étape 4 - URL publique du fichier (le bucket doit être configuré en accès public en lecture).
   const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${path}`;
   trace("url", true, publicUrl);
   return { publicUrl, path };
 }
 
-// Extrait le "path" interne au bucket à partir d'une URL publique Supabase Storage,
-// pour pouvoir la supprimer. Retourne null si l'URL ne vient pas de ce bucket
-// (ex: ancien placeholder de démo picsum.photos) — dans ce cas on ne tente pas
-// de suppression côté Storage, on retire juste la photo de l'admin.
 function extractSupabasePath(imageUrl) {
   const marker = `/storage/v1/object/public/${SUPABASE_BUCKET}/`;
   const idx = imageUrl.indexOf(marker);
@@ -417,12 +314,9 @@ function extractSupabasePath(imageUrl) {
   return imageUrl.slice(idx + marker.length);
 }
 
-// Suppression réelle du fichier dans Supabase Storage.
-// accessToken : jeton de session admin (voir requireAdmin()) — requis pour que
-// la policy RLS DELETE (authenticated + auth.uid() = admin) autorise l'opération.
 async function deleteFromSupabase(imageUrl, accessToken) {
   const path = extractSupabasePath(imageUrl);
-  if (!path) return; // pas une URL Supabase (ex: placeholder de démo) → rien à supprimer côté Storage
+  if (!path) return;
   if (!accessToken) {
     console.error("Suppression Supabase Storage refusée : administrateur non authentifié.");
     return;
@@ -436,8 +330,6 @@ async function deleteFromSupabase(imageUrl, accessToken) {
     },
   });
   if (!res.ok) {
-    // On n'interrompt pas le flux admin pour autant : la photo est déjà
-    // retirée de l'UI et de l'état local. On journalise pour diagnostic.
     console.error("Suppression Supabase Storage échouée:", res.status, path);
   }
 }
@@ -452,7 +344,7 @@ function makeProduct(id, name, brandId, categoryId, ref, seedBase, opts = {}) {
     reference: ref,
     description:
       opts.description ||
-      "Pièce signature Maison Novare pensée pour l'usage quotidien : matières sélectionnées, finitions soignées, coupe étudiée pour durer.",
+      "Pièce signature Luxury Streetwear pensée pour l'usage quotidien : matières sélectionnées, finitions soignées, coupe étudiée pour durer.",
     images: Array.from({ length: nPhotos }, (_, i) => img(`${seedBase}-${i}`)),
     sizes: opts.sizes || ["XS", "S", "M", "L", "XL"],
     colors: opts.colors || ["Noir", "Champagne"],
@@ -490,16 +382,16 @@ function Eyebrow({ children }) {
   return (
     <div
       className="inline-flex items-center gap-2 text-xs tracking-widest uppercase font-medium"
-      style={{ color: COLORS.gold, fontFamily: "Inter" }}
+      style={{ color: COLORS.magenta, fontFamily: "Inter" }}
     >
-      <span style={{ width: 18, height: 1, background: COLORS.gold, display: "inline-block" }} />
+      <span style={{ width: 18, height: 2, background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`, display: "inline-block", boxShadow: `0 0 6px ${COLORS.magenta}` }} />
       {children}
     </div>
   );
 }
 
 function TagCorner() {
-  // signature "clothing tag" motif — diagonal cut corner used across cards
+  // signature diagonal corner — désormais un dégradé néon violet/magenta
   return (
     <div
       aria-hidden
@@ -507,23 +399,28 @@ function TagCorner() {
         position: "absolute",
         top: 0,
         right: 0,
-        width: 0,
-        height: 0,
-        borderStyle: "solid",
-        borderWidth: "0 34px 34px 0",
-        borderColor: `transparent ${COLORS.gold} transparent transparent`,
+        width: 46,
+        height: 46,
+        background: `linear-gradient(135deg, ${COLORS.purple}, ${COLORS.magenta})`,
+        clipPath: "polygon(100% 0, 0 0, 100% 100%)",
+        filter: "drop-shadow(0 0 10px rgba(255,46,196,0.55))",
       }}
     />
   );
 }
 
 function Badge({ children, tone = "gold" }) {
-  const bg = tone === "gold" ? COLORS.gold : COLORS.surface2;
-  const color = tone === "gold" ? "#0B0B0C" : COLORS.ink;
+  const TONES = {
+    gold: { bg: COLORS.gold, color: "#08060D" },
+    dark: { bg: COLORS.surface2, color: COLORS.ink },
+    new: { bg: COLORS.green, color: "#08060D" },
+    promo: { bg: COLORS.magenta, color: "#08060D" },
+  };
+  const { bg, color } = TONES[tone] || TONES.gold;
   return (
     <span
       className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest rounded-sm"
-      style={{ background: bg, color, fontFamily: "Inter" }}
+      style={{ background: bg, color, fontFamily: "Inter", boxShadow: `0 0 10px ${bg}99` }}
     >
       {children}
     </span>
@@ -534,10 +431,18 @@ function GhostButton({ children, onClick, className = "" }) {
   return (
     <button
       onClick={onClick}
-      className={`px-6 py-3 text-sm uppercase tracking-widest font-semibold border transition-colors ${className}`}
-      style={{ borderColor: COLORS.gold, color: COLORS.ink, fontFamily: "Inter" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = COLORS.gold, e.currentTarget.style.color = "#0B0B0C")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent", e.currentTarget.style.color = COLORS.ink)}
+      className={`px-6 py-3 text-sm uppercase tracking-widest font-semibold border rounded-sm transition-all duration-200 ${className}`}
+      style={{ borderColor: COLORS.purple, color: COLORS.ink, fontFamily: "Inter" }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`;
+        e.currentTarget.style.color = "#08060D";
+        e.currentTarget.style.boxShadow = `0 0 18px rgba(255,46,196,0.55)`;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.color = COLORS.ink;
+        e.currentTarget.style.boxShadow = "none";
+      }}
     >
       {children}
     </button>
@@ -548,8 +453,13 @@ function SolidButton({ children, onClick, className = "" }) {
   return (
     <button
       onClick={onClick}
-      className={`px-6 py-3 text-sm uppercase tracking-widest font-semibold transition-transform active:scale-95 ${className}`}
-      style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+      className={`px-6 py-3 text-sm uppercase tracking-widest font-semibold rounded-sm transition-transform active:scale-95 ${className}`}
+      style={{
+        background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`,
+        color: "#08060D",
+        fontFamily: "Inter",
+        boxShadow: `0 0 16px rgba(255,46,196,0.5)`,
+      }}
     >
       {children}
     </button>
@@ -572,12 +482,12 @@ function Header({ route, go, cartCount }) {
   return (
     <header
       className="sticky top-0 z-40 border-b"
-      style={{ background: "rgba(11,11,12,0.92)", backdropFilter: "blur(10px)", borderColor: COLORS.line }}
+      style={{ background: "rgba(8,6,13,0.92)", backdropFilter: "blur(10px)", borderColor: COLORS.line }}
     >
       <div className="max-w-7xl mx-auto flex items-center justify-between px-5 md:px-8 h-16">
         <button onClick={() => go("home")} className="flex flex-col items-start leading-none">
-          <span style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, color: COLORS.ink }}>MAISON</span>
-          <span style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, color: COLORS.gold, marginTop: -4 }}>NOVARE</span>
+          <span style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, color: COLORS.ink }}>LUXURY</span>
+          <span className="neon-text" style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, marginTop: -4 }}>STREETWEAR</span>
         </button>
 
         <nav className="hidden lg:flex items-center gap-7">
@@ -588,7 +498,7 @@ function Header({ route, go, cartCount }) {
               className="text-xs uppercase tracking-widest font-medium"
               style={{
                 fontFamily: "Inter",
-                color: route === r || (r === "catalog" && route === "product") ? COLORS.gold : COLORS.inkDim,
+                color: route === r || (r === "catalog" && route === "product") ? COLORS.magenta : COLORS.inkDim,
               }}
             >
               {label}
@@ -607,7 +517,7 @@ function Header({ route, go, cartCount }) {
           >
             <span style={{ width: 22, height: 2, background: COLORS.ink, display: "block" }} />
             <span style={{ width: 22, height: 2, background: COLORS.ink, display: "block" }} />
-            <span style={{ width: 14, height: 2, background: COLORS.gold, display: "block" }} />
+            <span style={{ width: 14, height: 2, background: COLORS.magenta, display: "block" }} />
           </button>
         </div>
       </div>
@@ -620,7 +530,7 @@ function Header({ route, go, cartCount }) {
                 key={r}
                 onClick={() => { go(r); setOpen(false); }}
                 className="text-left py-3 text-sm uppercase tracking-widest border-b"
-                style={{ fontFamily: "Inter", color: route === r ? COLORS.gold : COLORS.ink, borderColor: COLORS.line }}
+                style={{ fontFamily: "Inter", color: route === r ? COLORS.magenta : COLORS.ink, borderColor: COLORS.line }}
               >
                 {label}
               </button>
@@ -643,12 +553,12 @@ function Header({ route, go, cartCount }) {
 
 function Hero({ go }) {
   return (
-    <section className="relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${COLORS.bg} 0%, #141416 60%, #0B0B0C 100%)` }}>
+    <section className="relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${COLORS.bg} 0%, #150F22 55%, ${COLORS.bg} 100%)` }}>
       <div
         aria-hidden
-        className="absolute inset-0 opacity-40"
+        className="absolute inset-0 opacity-70"
         style={{
-          background: `radial-gradient(circle at 80% 20%, rgba(201,169,97,0.18), transparent 45%), radial-gradient(circle at 10% 90%, rgba(201,169,97,0.10), transparent 40%)`,
+          background: `radial-gradient(circle at 85% 15%, rgba(255,46,196,0.28), transparent 45%), radial-gradient(circle at 10% 85%, rgba(139,47,232,0.28), transparent 45%), radial-gradient(circle at 50% 50%, rgba(46,140,255,0.10), transparent 60%)`,
         }}
       />
       <div className="max-w-7xl mx-auto px-5 md:px-8 pt-14 pb-16 md:pt-24 md:pb-24 relative grid md:grid-cols-2 gap-10 items-center">
@@ -658,9 +568,9 @@ function Hero({ go }) {
             className="mt-5 leading-[0.95]"
             style={{ fontFamily: "Anton", fontSize: "clamp(48px, 9vw, 96px)", color: COLORS.ink, letterSpacing: 0.5 }}
           >
-            MAISON
+            LUXURY
             <br />
-            <span style={{ color: COLORS.gold }}>NOVARE</span>
+            <span className="neon-text">STREETWEAR</span>
           </h1>
           <p className="mt-5 text-base md:text-lg max-w-md" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>
             Une autre vision du style. Streetwear premium, matières sélectionnées, silhouettes conçues pour durer.
@@ -673,20 +583,20 @@ function Hero({ go }) {
 
         <div className="relative h-[380px] md:h-[520px]">
           <div className="absolute inset-0 grid grid-cols-2 gap-4">
-            <div className="relative rounded-sm overflow-hidden translate-y-6">
+            <div className="relative rounded-sm overflow-hidden translate-y-6 neon-border">
               <img src={img("hero-a", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
-              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,11,12,0.6))" }} />
+              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))" }} />
             </div>
-            <div className="relative rounded-sm overflow-hidden -translate-y-6">
+            <div className="relative rounded-sm overflow-hidden -translate-y-6 neon-border">
               <img src={img("hero-b", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
-              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,11,12,0.6))" }} />
+              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))" }} />
             </div>
           </div>
           <div
-            className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 text-[11px] uppercase tracking-widest font-semibold"
-            style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+            className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 text-[11px] uppercase tracking-widest font-semibold rounded-sm"
+            style={{ background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`, color: "#08060D", fontFamily: "Inter", boxShadow: `0 0 20px rgba(255,46,196,0.5)` }}
           >
-            Édition permanente — NVR
+            Édition permanente — LXS
           </div>
         </div>
       </div>
@@ -736,9 +646,9 @@ function CategoryGrid({ go, setCategoryFilter }) {
               className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
               onError={handleImgError}
             />
-            <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(11,11,12,0.1) 30%, rgba(11,11,12,0.9))" }} />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(8,6,13,0.15) 30%, rgba(8,6,13,0.92))" }} />
             <TagCorner />
-            <div className="absolute top-3 left-3 text-[11px] font-mono" style={{ color: COLORS.gold }}>{c.tag}</div>
+            <div className="absolute top-3 left-3 text-[11px] font-mono" style={{ color: COLORS.magenta }}>{c.tag}</div>
             <div className="absolute bottom-0 p-4">
               <div style={{ fontFamily: "Anton", fontSize: 22, color: COLORS.ink, letterSpacing: 0.5 }}>{c.name.toUpperCase()}</div>
               <div className="text-[11px] mt-1" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>{c.desc}</div>
@@ -764,17 +674,17 @@ function ProductCard({ product, brand, onOpen }) {
         />
         <TagCorner />
         <div className="absolute top-3 left-3 flex gap-2">
-          {product.isNew && <Badge>Nouveau</Badge>}
+          {product.isNew && <Badge tone="new">Nouveau</Badge>}
           {product.featured && <Badge tone="dark">En avant</Badge>}
         </div>
         {!product.availability && (
-          <div className="absolute inset-x-0 bottom-0 py-1.5 text-center text-[10px] uppercase tracking-widest" style={{ background: "rgba(0,0,0,0.7)", color: COLORS.inkDim, fontFamily: "Inter" }}>
+          <div className="absolute inset-x-0 bottom-0 py-1.5 text-center text-[10px] uppercase tracking-widest" style={{ background: "rgba(0,0,0,0.75)", color: COLORS.inkDim, fontFamily: "Inter" }}>
             Rupture de stock
           </div>
         )}
       </div>
       <div className="mt-3">
-        <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{brand?.name}</div>
+        <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{brand?.name}</div>
         <div className="text-sm mt-0.5" style={{ color: COLORS.ink, fontFamily: "Inter", fontWeight: 600 }}>{product.name}</div>
         <div className="text-[11px] mt-0.5 font-mono" style={{ color: COLORS.inkDim }}>{product.reference}</div>
       </div>
@@ -858,7 +768,7 @@ function Catalog({ products, brands, initialCategory, forceNew, onOpen, go }) {
       <button
         onClick={() => { setSearch(""); setCategory("all"); setBrand("all"); setSize("all"); setColor("all"); setOnlyNew(false); setOnlyFeatured(false); }}
         className="text-xs uppercase tracking-widest underline"
-        style={{ color: COLORS.gold, fontFamily: "Inter" }}
+        style={{ color: COLORS.magenta, fontFamily: "Inter" }}
       >
         Réinitialiser les filtres
       </button>
@@ -982,7 +892,7 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
             />
             <TagCorner />
             <div className="absolute top-3 left-3 flex gap-2">
-              {product.isNew && <Badge>Nouveau</Badge>}
+              {product.isNew && <Badge tone="new">Nouveau</Badge>}
               {product.featured && <Badge tone="dark">En avant</Badge>}
             </div>
           </div>
@@ -992,7 +902,7 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
                 key={i}
                 onClick={() => setActiveImg(i)}
                 className="shrink-0 rounded-sm overflow-hidden"
-                style={{ width: 72, height: 90, outline: activeImg === i ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}` }}
+                style={{ width: 72, height: 90, outline: activeImg === i ? `2px solid ${COLORS.magenta}` : `1px solid ${COLORS.line}` }}
               >
                 <img src={im} alt="" className="w-full h-full object-cover" onError={handleImgError} />
               </button>
@@ -1001,7 +911,7 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
         </div>
 
         <div>
-          <div className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{brand?.name}</div>
+          <div className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{brand?.name}</div>
           <h1 className="mt-2" style={{ fontFamily: "Anton", fontSize: "clamp(28px,4vw,40px)", color: COLORS.ink }}>{product.name.toUpperCase()}</h1>
           <div className="mt-2 text-xs font-mono" style={{ color: COLORS.inkDim }}>Réf. {product.reference}</div>
 
@@ -1016,7 +926,7 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
                     key={c}
                     onClick={() => setSelColor(c)}
                     className="w-8 h-8 rounded-full"
-                    style={{ background: COLOR_SWATCHES[c] || "#444", outline: selColor === c ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}`, outlineOffset: 2 }}
+                    style={{ background: COLOR_SWATCHES[c] || "#444", outline: selColor === c ? `2px solid ${COLORS.magenta}` : `1px solid ${COLORS.line}`, outlineOffset: 2 }}
                     aria-label={c}
                   />
                 ))}
@@ -1034,8 +944,8 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
                     onClick={() => setSelSize(s)}
                     className="px-4 py-2 text-sm rounded-sm"
                     style={{
-                      border: `1px solid ${selSize === s ? COLORS.gold : COLORS.line}`,
-                      color: selSize === s ? COLORS.gold : COLORS.ink,
+                      border: `1px solid ${selSize === s ? COLORS.magenta : COLORS.line}`,
+                      color: selSize === s ? COLORS.magenta : COLORS.ink,
                       fontFamily: "Inter",
                     }}
                   >
@@ -1048,9 +958,9 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
 
           <div className="mt-6 text-sm" style={{ fontFamily: "Inter" }}>
             {product.availability ? (
-              <span style={{ color: "#7CC49A" }}>● Disponible</span>
+              <span style={{ color: COLORS.green }}>● Disponible</span>
             ) : (
-              <span style={{ color: "#C97C7C" }}>● Rupture de stock</span>
+              <span style={{ color: "#FF5C7A" }}>● Rupture de stock</span>
             )}
           </div>
 
@@ -1105,7 +1015,7 @@ function BrandsPage({ brands, products, onOpenBrand, selectedBrand, onOpen, go }
   }
   return (
     <section className="max-w-7xl mx-auto px-5 md:px-8 py-12">
-      <Eyebrow>Univers Novare</Eyebrow>
+      <Eyebrow>Univers Luxury Streetwear</Eyebrow>
       <h1 className="mt-3 mb-8" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>MARQUES</h1>
       <div className="grid md:grid-cols-2 gap-5">
         {brands.map((b) => {
@@ -1115,7 +1025,7 @@ function BrandsPage({ brands, products, onOpenBrand, selectedBrand, onOpen, go }
               <TagCorner />
               <div style={{ fontFamily: "Anton", fontSize: 26, color: COLORS.ink }}>{b.name.toUpperCase()}</div>
               <p className="text-sm mt-2 max-w-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{b.description}</p>
-              <div className="text-xs mt-4 uppercase tracking-widest" style={{ color: COLORS.gold, fontFamily: "Inter" }}>{count} produit{count > 1 ? "s" : ""} →</div>
+              <div className="text-xs mt-4 uppercase tracking-widest" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{count} produit{count > 1 ? "s" : ""} →</div>
             </button>
           );
         })}
@@ -1139,7 +1049,7 @@ function CollectionsPage({ products, brands, onOpen, go, setCategoryFilter }) {
       <h1 className="mt-3 mb-10" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>COLLECTIONS</h1>
       {groups.map((g) => (
         <div key={g.title} className="mb-14">
-          <h2 className="mb-5" style={{ fontFamily: "Anton", fontSize: 24, color: COLORS.gold }}>{g.title}</h2>
+          <h2 className="mb-5 neon-text" style={{ fontFamily: "Anton", fontSize: 24 }}>{g.title}</h2>
           {g.items.length === 0 ? (
             <p className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Aucune pièce pour le moment.</p>
           ) : (
@@ -1163,7 +1073,7 @@ function AboutPage({ go }) {
       <Eyebrow>Maison</Eyebrow>
       <h1 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>À PROPOS</h1>
       <p className="text-sm leading-relaxed mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-        Maison Novare est une plateforme catalogue réunissant plusieurs marques de streetwear premium. Notre rôle : sélectionner, présenter et organiser des pièces vestimentaires, chaussures, sacs, accessoires, casquettes et montres au sein d'une expérience unique.
+        Luxury Streetwear est une plateforme catalogue réunissant plusieurs marques de streetwear premium. Notre rôle : sélectionner, présenter et organiser des pièces vestimentaires, chaussures, sacs, accessoires, casquettes et montres au sein d'une expérience unique.
       </p>
       <p className="text-sm leading-relaxed mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
         Chaque fiche produit indique clairement sa marque d'origine. Nous ne présentons aucun produit comme partenaire officiel, revendeur agréé ou affilié à une marque sans autorisation vérifiée.
@@ -1191,8 +1101,8 @@ function ContactPage() {
         <h1 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>PARLONS-EN</h1>
 
         {sent ? (
-          <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.gold, background: COLORS.surface }}>
-            <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.gold }}>MESSAGE ENVOYÉ</div>
+          <div className="p-6 rounded-sm border neon-border" style={{ background: COLORS.surface }}>
+            <div className="neon-text" style={{ fontFamily: "Anton", fontSize: 20 }}>MESSAGE ENVOYÉ</div>
             <p className="text-sm mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nous revenons vers vous rapidement.</p>
           </div>
         ) : (
@@ -1212,7 +1122,7 @@ function ContactPage() {
 
       <div className="space-y-6">
         <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
-          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Réseaux</div>
+          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Réseaux</div>
           {["Instagram", "TikTok", "Snapchat", "WhatsApp"].map((s) => (
             <div key={s} className="flex items-center justify-between py-2 border-b last:border-0 text-sm" style={{ borderColor: COLORS.line, fontFamily: "Inter", color: COLORS.ink }}>
               {s}
@@ -1221,7 +1131,7 @@ function ContactPage() {
           ))}
         </div>
         <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
-          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Service</div>
+          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Service</div>
           <p className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Livraison partout en France. Remise en main propre disponible sur Paris et Île-de-France. Support 7j/7.</p>
         </div>
       </div>
@@ -1264,15 +1174,12 @@ function AdminLogin({ onSignedIn }) {
       const client = await getSupabaseAuthClient();
       const { data, error: signInError } = await client.auth.signInWithPassword({ email, password });
       if (signInError) {
-        // Message d'erreur réel renvoyé par Supabase Auth (ex: "Invalid login
-        // credentials"), jamais un message générique.
         throw new Error(signInError.message || "Authentication error");
       }
       if (!data || !data.user) {
         throw new Error("Authentication error");
       }
       if (data.user.id !== ADMIN_USER_ID) {
-        // On déconnecte immédiatement tout compte qui n'est pas l'admin désigné.
         await client.auth.signOut();
         throw new Error("Unauthorized : ce compte n'est pas administrateur.");
       }
@@ -1314,7 +1221,7 @@ function AdminLogin({ onSignedIn }) {
           />
         </div>
         {error && (
-          <div className="text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#C97C7C", fontFamily: "Inter" }}>
+          <div className="text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
             {error}
           </div>
         )}
@@ -1326,20 +1233,16 @@ function AdminLogin({ onSignedIn }) {
 
 function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus, onSignOut }) {
   const [tab, setTab] = useState("products");
-  const [editing, setEditing] = useState(null); // product being edited, or emptyProduct()
+  const [editing, setEditing] = useState(null);
   const [editingBrand, setEditingBrand] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  // -------- upload de photos (remplace l'ancien champ "URL de l'image") --------
   const fileInputRef = useRef(null);
-  const [uploadStatus, setUploadStatus] = useState(""); // "", "uploading", "done"
-  // debugLog : liste d'entrées { fileName, step, ok, detail } — trace RÉELLE
-  // de chaque étape (sélection/conversion/connexion/upload/url) pour chaque
-  // fichier, avec le message d'erreur exact renvoyé par Supabase le cas échéant.
+  const [uploadStatus, setUploadStatus] = useState("");
   const [debugLog, setDebugLog] = useState([]);
-  const [dragIndex, setDragIndex] = useState(null); // index de la photo en cours de glisser-déposer
-  const [isDraggingOverDrop, setIsDraggingOverDrop] = useState(false); // zone glisser-déposer
+  const [dragIndex, setDragIndex] = useState(null);
+  const [isDraggingOverDrop, setIsDraggingOverDrop] = useState(false);
 
   const tabs = [
     ["products", "Produits"],
@@ -1347,7 +1250,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     ["categories", "Catégories"],
   ];
 
-  /* -------- product CRUD -------- */
   const [saveError, setSaveError] = useState("");
   const saveProduct = async () => {
     if (!editing.name || !editing.brandId || !editing.categoryId || !editing.reference) return;
@@ -1370,11 +1272,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     setConfirmDelete(null);
   };
 
-  // -------- Sélection de fichiers depuis l'appareil (photos/pellicule ou dossier) --------
-  // Le tableau editing.images reste un tableau d'URLs (comme avant) : l'ordre du
-  // tableau EST l'ordre d'affichage (sort_order), et images[0] EST la photo
-  // principale (is_primary). Ce mapping garde tout le reste du site (catalogue,
-  // accueil, fiche produit) inchangé, car il lit déjà product.images[0].
   const openFilePicker = () => fileInputRef.current?.click();
 
   const handleFilesSelected = async (fileList) => {
@@ -1384,8 +1281,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     setUploadStatus("uploading");
     setDebugLog([]);
 
-    // Vérification admin AVANT tout upload : on récupère un access_token frais
-    // (jamais celui d'un état local potentiellement périmé).
     let accessToken;
     try {
       ({ accessToken } = await requireAdmin());
@@ -1397,7 +1292,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     }
 
     const newUrls = [];
-    const fileLogs = []; // logs accumulés pendant cet appel (setDebugLog est asynchrone)
+    const fileLogs = [];
 
     await Promise.allSettled(
       files.map(async (file) => {
@@ -1409,15 +1304,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
         try {
           const uploaded = await uploadToSupabase(file, accessToken, onStep);
           newUrls.push(uploaded.publicUrl);
-          // TODO SUPABASE: insérer ici une ligne dans product_images
-          // { product_id: editing.id, image_url: uploaded.publicUrl, sort_order: ..., is_primary: ... }
-          // (l'ID produit définitif n'existe que pour un produit déjà enregistré ;
-          // pour un nouveau produit, cette insertion se fait dans saveProduct
-          // au moment où l'id "p"+Date.now() est généré.)
         } catch (err) {
-          // L'étape en échec a déjà été tracée par onStep ci-dessus ; on
-          // s'assure ici qu'il existe AU MOINS une entrée d'échec même si
-          // l'erreur est survenue avant le premier trace() (cas improbable).
           if (!fileLogs.some((l) => l.fileName === fileName && !l.ok)) {
             const detail = err && err.message ? err.message : String(err);
             fileLogs.push({ fileName, step: "upload", ok: false, detail });
@@ -1435,10 +1322,9 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 
   const onFileInputChange = (e) => {
     handleFilesSelected(e.target.files);
-    e.target.value = ""; // permet de re-sélectionner le(s) même(s) fichier(s) ensuite
+    e.target.value = "";
   };
 
-  // -------- Solution de secours : glisser-déposer les photos directement --------
   const onDropZoneDragOver = (e) => { e.preventDefault(); setIsDraggingOverDrop(true); };
   const onDropZoneDragLeave = () => setIsDraggingOverDrop(false);
   const onDropZoneDrop = (e) => {
@@ -1450,8 +1336,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   const removeImage = async (idx) => {
     const url = editing.images[idx];
     setEditing((e) => ({ ...e, images: e.images.filter((_, i) => i !== idx) }));
-    // TODO SUPABASE: supprimer aussi la ligne product_images correspondante
-    // (ex: supabase.from('product_images').delete().eq('image_url', url)).
     try {
       const { accessToken } = await requireAdmin();
       await deleteFromSupabase(url, accessToken);
@@ -1470,7 +1354,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     });
   };
 
-  // -------- Réorganisation par drag-and-drop --------
   const onImageDragStart = (idx) => setDragIndex(idx);
   const onImageDragOver = (e) => e.preventDefault();
   const onImageDrop = (idx) => {
@@ -1491,7 +1374,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     });
   };
 
-  /* -------- brand CRUD -------- */
   const saveBrand = () => {
     if (!editingBrand.name) return;
     if (editingBrand.id) {
@@ -1504,7 +1386,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   };
   const deleteBrand = (id) => setBrands((prev) => prev.filter((b) => b.id !== id));
 
-  /* -------- category CRUD -------- */
   const saveCategory = () => {
     if (!editingCategory.name) return;
     if (editingCategory.id) {
@@ -1530,7 +1411,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
       <div className="flex items-center gap-3 flex-wrap mt-3 mb-2">
         <h1 style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,40px)", color: COLORS.ink }}>ADMINISTRATION</h1>
         {saveStatus && (
-          <span className="text-[11px] uppercase tracking-widest" style={{ color: saveStatus === "erreur" ? "#C97C7C" : COLORS.gold, fontFamily: "Inter" }}>
+          <span className="text-[11px] uppercase tracking-widest" style={{ color: saveStatus === "erreur" ? "#FF5C7A" : COLORS.magenta, fontFamily: "Inter" }}>
             {saveStatus === "enregistrement" ? "Enregistrement…" : saveStatus === "enregistré" ? "✓ Enregistré" : saveStatus === "erreur" ? "⚠ Erreur de sauvegarde" : ""}
           </span>
         )}
@@ -1545,14 +1426,13 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
             key={t}
             onClick={() => { setTab(t); setEditing(null); setEditingBrand(null); setEditingCategory(null); }}
             className="px-4 py-3 text-xs uppercase tracking-widest font-semibold"
-            style={{ color: tab === t ? COLORS.gold : COLORS.inkDim, borderBottom: tab === t ? `2px solid ${COLORS.gold}` : "2px solid transparent", fontFamily: "Inter" }}
+            style={{ color: tab === t ? COLORS.magenta : COLORS.inkDim, borderBottom: tab === t ? `2px solid ${COLORS.magenta}` : "2px solid transparent", fontFamily: "Inter" }}
           >
             {label}
           </button>
         ))}
       </div>
 
-      {/* -------- PRODUCTS TAB -------- */}
       {tab === "products" && !editing && (
         <div>
           <SolidButton onClick={() => setEditing(emptyProduct())} className="mb-6">+ Ajouter un produit</SolidButton>
@@ -1580,15 +1460,15 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                     <td className="py-2 pr-4 font-mono text-xs" style={{ color: COLORS.inkDim }}>{p.reference}</td>
                     <td className="py-2 pr-4">
                       <div className="flex gap-1 flex-wrap">
-                        {p.isNew && <Badge>Nouveau</Badge>}
+                        {p.isNew && <Badge tone="new">Nouveau</Badge>}
                         {p.featured && <Badge tone="dark">En avant</Badge>}
                         {!p.availability && <Badge tone="dark">Rupture</Badge>}
                       </div>
                     </td>
                     <td className="py-2 pr-4">
                       <div className="flex gap-3">
-                        <button onClick={() => setEditing(p)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
-                        <button onClick={() => setConfirmDelete(p.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                        <button onClick={() => setEditing(p)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta }}>Modifier</button>
+                        <button onClick={() => setConfirmDelete(p.id)} className="text-xs uppercase tracking-widest" style={{ color: "#FF5C7A" }}>Supprimer</button>
                       </div>
                     </td>
                   </tr>
@@ -1653,11 +1533,11 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                         style={{ cursor: "grab", opacity: dragIndex === i ? 0.4 : 1 }}
                         title="Glisser pour réorganiser"
                       >
-                        <img src={im} className="w-16 h-20 object-cover rounded-sm" alt="" onError={handleImgError} style={{ border: i === 0 ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.line}` }} />
+                        <img src={im} className="w-16 h-20 object-cover rounded-sm" alt="" onError={handleImgError} style={{ border: i === 0 ? `2px solid ${COLORS.magenta}` : `1px solid ${COLORS.line}` }} />
                         <button
                           onClick={() => removeImage(i)}
                           className="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs"
-                          style={{ background: "#C97C7C", color: "#0B0B0C" }}
+                          style={{ background: "#FF5C7A", color: "#08060D" }}
                           title="Supprimer la photo"
                         >
                           ✕
@@ -1665,7 +1545,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                         {i === 0 ? (
                           <span
                             className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-[9px] uppercase tracking-widest font-semibold rounded-sm whitespace-nowrap"
-                            style={{ background: COLORS.gold, color: "#0B0B0C", fontFamily: "Inter" }}
+                            style={{ background: COLORS.magenta, color: "#08060D", fontFamily: "Inter" }}
                           >
                             ★ Principale
                           </span>
@@ -1683,7 +1563,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                     ))}
                   </div>
                   <p className="text-[11px] mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-                    Glissez-déposez les photos pour changer leur ordre. La photo entourée en champagne est la photo principale.
+                    Glissez-déposez les photos pour changer leur ordre. La photo entourée en magenta est la photo principale.
                   </p>
                 </>
               )}
@@ -1697,9 +1577,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 onChange={onFileInputChange}
               />
 
-              {/* Solution de secours : glisser-déposer directement des fichiers,
-                  en plus du bouton de sélection (fonctionne aussi sur mobile
-                  si le navigateur le permet, mais surtout utile sur ordinateur). */}
               <div
                 onDragOver={onDropZoneDragOver}
                 onDragLeave={onDropZoneDragLeave}
@@ -1707,7 +1584,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 onClick={openFilePicker}
                 className="flex flex-col items-center justify-center gap-2 px-4 py-8 rounded-sm text-center cursor-pointer transition-colors"
                 style={{
-                  border: `2px dashed ${isDraggingOverDrop ? COLORS.gold : COLORS.line}`,
+                  border: `2px dashed ${isDraggingOverDrop ? COLORS.magenta : COLORS.line}`,
                   background: isDraggingOverDrop ? COLORS.surface2 : "transparent",
                 }}
               >
@@ -1724,20 +1601,16 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
               </div>
 
               {uploadStatus === "uploading" && (
-                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
+                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.magenta }}>
                   Import des photos en cours…
                 </div>
               )}
               {uploadStatus === "done" && debugLog.every((l) => l.ok) && debugLog.length > 0 && (
-                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.gold }}>
+                <div className="text-xs mt-3" style={{ fontFamily: "Inter", color: COLORS.green }}>
                   Photos ajoutées ✓
                 </div>
               )}
 
-              {/* -------- Panneau de debug réel -------- */}
-              {/* Trace chaque étape (sélection / conversion / connexion / upload / url)
-                  pour chaque fichier, avec le message d'erreur EXACT renvoyé par
-                  Supabase en cas d'échec — jamais un message générique. */}
               {debugLog.length > 0 && (
                 <div className="mt-3 rounded-sm overflow-hidden" style={{ border: `1px solid ${COLORS.line}` }}>
                   <div className="px-3 py-2 text-[10px] uppercase tracking-widest" style={{ background: COLORS.surface2, color: COLORS.inkDim, fontFamily: "Inter" }}>
@@ -1753,7 +1626,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                       <div key={fileName} className="px-3 py-2 border-t" style={{ borderColor: COLORS.line }}>
                         <div className="text-xs font-semibold mb-1" style={{ fontFamily: "Inter", color: COLORS.ink }}>{fileName}</div>
                         {entries.map((l, idx) => (
-                          <div key={idx} className="text-[11px] flex items-start gap-1.5" style={{ fontFamily: "Inter", color: l.ok ? COLORS.inkDim : "#C97C7C" }}>
+                          <div key={idx} className="text-[11px] flex items-start gap-1.5" style={{ fontFamily: "Inter", color: l.ok ? COLORS.inkDim : "#FF5C7A" }}>
                             <span>{l.ok ? "✅" : "❌"}</span>
                             <span>
                               <strong>{STEP_LABELS[l.step] || l.step}</strong>
@@ -1776,7 +1649,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
               <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Tailles</label>
               <div className="flex flex-wrap gap-2">
                 {["Unique", "38", "39", "40", "41", "42", "43", "44", "45", "XS", "S", "M", "L", "XL"].map((s) => (
-                  <button key={s} type="button" onClick={() => toggleListValue("sizes", s)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.sizes.includes(s) ? COLORS.gold : COLORS.line}`, color: editing.sizes.includes(s) ? COLORS.gold : COLORS.ink }}>{s}</button>
+                  <button key={s} type="button" onClick={() => toggleListValue("sizes", s)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.sizes.includes(s) ? COLORS.magenta : COLORS.line}`, color: editing.sizes.includes(s) ? COLORS.magenta : COLORS.ink }}>{s}</button>
                 ))}
               </div>
             </div>
@@ -1784,7 +1657,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
               <label className="text-[11px] uppercase tracking-widest block mb-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Couleurs</label>
               <div className="flex flex-wrap gap-2">
                 {Object.keys(COLOR_SWATCHES).map((c) => (
-                  <button key={c} type="button" onClick={() => toggleListValue("colors", c)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.colors.includes(c) ? COLORS.gold : COLORS.line}`, color: editing.colors.includes(c) ? COLORS.gold : COLORS.ink }}>{c}</button>
+                  <button key={c} type="button" onClick={() => toggleListValue("colors", c)} className="px-3 py-1.5 text-xs rounded-sm" style={{ border: `1px solid ${editing.colors.includes(c) ? COLORS.magenta : COLORS.line}`, color: editing.colors.includes(c) ? COLORS.magenta : COLORS.ink }}>{c}</button>
                 ))}
               </div>
             </div>
@@ -1803,7 +1676,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
           </div>
 
           {saveError && (
-            <div className="mt-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#C97C7C", fontFamily: "Inter" }}>
+            <div className="mt-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
               {saveError}
             </div>
           )}
@@ -1814,7 +1687,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
         </div>
       )}
 
-      {/* -------- BRANDS TAB -------- */}
       {tab === "brands" && !editingBrand && (
         <div>
           <SolidButton onClick={() => setEditingBrand({ id: null, name: "", description: "" })} className="mb-6">+ Ajouter une marque</SolidButton>
@@ -1825,8 +1697,8 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 <p className="text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{b.description}</p>
                 <div className="text-xs mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{products.filter((p) => p.brandId === b.id).length} produit(s)</div>
                 <div className="flex gap-3 mt-3">
-                  <button onClick={() => setEditingBrand(b)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
-                  <button onClick={() => deleteBrand(b.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                  <button onClick={() => setEditingBrand(b)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta }}>Modifier</button>
+                  <button onClick={() => deleteBrand(b.id)} className="text-xs uppercase tracking-widest" style={{ color: "#FF5C7A" }}>Supprimer</button>
                 </div>
               </div>
             ))}
@@ -1848,7 +1720,6 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
         </div>
       )}
 
-      {/* -------- CATEGORIES TAB -------- */}
       {tab === "categories" && !editingCategory && (
         <div>
           <SolidButton onClick={() => setEditingCategory({ id: null, name: "", desc: "" })} className="mb-6">+ Ajouter une catégorie</SolidButton>
@@ -1859,8 +1730,8 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 <p className="text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{c.desc}</p>
                 <div className="text-xs mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{products.filter((p) => p.categoryId === c.id).length} produit(s)</div>
                 <div className="flex gap-3 mt-3">
-                  <button onClick={() => setEditingCategory(c)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.gold }}>Modifier</button>
-                  <button onClick={() => deleteCategory(c.id)} className="text-xs uppercase tracking-widest" style={{ color: "#C97C7C" }}>Supprimer</button>
+                  <button onClick={() => setEditingCategory(c)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta }}>Modifier</button>
+                  <button onClick={() => deleteCategory(c.id)} className="text-xs uppercase tracking-widest" style={{ color: "#FF5C7A" }}>Supprimer</button>
                 </div>
               </div>
             ))}
@@ -1884,7 +1755,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(0,0,0,0.7)" }}>
-          <div className="max-w-sm w-full p-6 rounded-sm" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+          <div className="max-w-sm w-full p-6 rounded-sm neon-border" style={{ background: COLORS.surface }}>
             <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>SUPPRIMER CE PRODUIT ?</div>
             <p className="text-sm mt-2 mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Cette action est irréversible pour cette session.</p>
             <div className="flex gap-3">
@@ -1905,30 +1776,30 @@ function Footer({ go }) {
     <footer className="border-t mt-10" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
       <div className="max-w-7xl mx-auto px-5 md:px-8 py-12 grid sm:grid-cols-2 md:grid-cols-4 gap-8">
         <div>
-          <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>MAISON <span style={{ color: COLORS.gold }}>NOVARE</span></div>
+          <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>LUXURY <span className="neon-text">STREETWEAR</span></div>
           <p className="text-xs mt-3 max-w-xs" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Plateforme catalogue streetwear premium — sélection multi-marques, service dédié.</p>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Navigation</div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Navigation</div>
           {[["home","Accueil"],["catalog","Catalogue"],["catalog-new","Nouveautés"],["collections","Collections"],["contact","Contact"]].map(([r,l]) => (
             <button key={r} onClick={() => go(r)} className="block text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{l}</button>
           ))}
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Catégories</div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Catégories</div>
           {CATEGORIES.map((c) => (
             <div key={c.id} className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{c.name}</div>
           ))}
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.gold, fontFamily: "Inter" }}>Service</div>
+          <div className="text-[11px] uppercase tracking-widest mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Service</div>
           <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Livraison France entière</div>
           <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Remise en main propre — Paris/IDF</div>
           <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Support 7j/7</div>
         </div>
       </div>
       <div className="border-t py-5 text-center text-[11px]" style={{ borderColor: COLORS.line, color: COLORS.inkDim, fontFamily: "Inter" }}>
-        © 2026 Maison Novare — Tous droits réservés
+        © 2026 Luxury Streetwear — Tous droits réservés
       </div>
     </footer>
   );
@@ -1936,7 +1807,7 @@ function Footer({ go }) {
 
 /* ---------------- App root ---------------- */
 
-const STORAGE_KEY = "maison-novare-catalog-data";
+const STORAGE_KEY = "luxury-streetwear-catalog-data";
 
 export default function App() {
   const [route, setRoute] = useState("home");
@@ -1948,12 +1819,8 @@ export default function App() {
   const [selectedBrandId, setSelectedBrandId] = useState(null);
 
   const [loaded, setLoaded] = useState(false);
-  const [saveStatus, setSaveStatus] = useState(""); // "", "enregistrement", "enregistré", "erreur"
+  const [saveStatus, setSaveStatus] = useState("");
 
-  // -------- Session Supabase Auth (admin) --------
-  // authChecked : évite un flash de l'écran de connexion pendant la toute
-  // première vérification de session au chargement de la page.
-  // session : session Supabase Auth actuelle (ou null si non connecté).
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const isAdmin = !!(session && session.user && session.user.id === ADMIN_USER_ID);
@@ -1971,8 +1838,6 @@ export default function App() {
         });
         unsubscribe = () => sub.subscription.unsubscribe();
       } catch (err) {
-        // SDK indisponible (ex: réseau bloqué) — l'admin restera sur l'écran
-        // de connexion, avec un message d'erreur affiché s'il tente de se connecter.
         console.error("Supabase Auth indisponible:", err);
       } finally {
         if (!cancelled) setAuthChecked(true);
@@ -1994,8 +1859,6 @@ export default function App() {
     setSession(null);
   };
 
-  // Load any previously saved catalog data once, on first mount.
-  // This is what makes admin edits (including added image URLs) survive a page refresh.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -2006,13 +1869,11 @@ export default function App() {
         if (Array.isArray(data.categories)) setCategories(data.categories);
       }
     } catch (err) {
-      // No saved data yet (first visit) — keep the built-in demo catalog.
     } finally {
       setLoaded(true);
     }
   }, []);
 
-  // Persist products/brands/categories any time they change, once initial load is done.
   useEffect(() => {
     if (!loaded) return;
     setSaveStatus("enregistrement");
@@ -2042,11 +1903,28 @@ export default function App() {
     <div style={{ background: COLORS.bg, minHeight: "100vh" }}>
       <style>{FONT_IMPORT}{`
         * { box-sizing: border-box; }
-        body { margin: 0; }
+        body { margin: 0; background: ${COLORS.bg}; }
         select, input, textarea { outline: none; }
-        select:focus, input:focus, textarea:focus { outline: 2px solid ${COLORS.gold}; outline-offset: 1px; }
-        button:focus-visible, a:focus-visible { outline: 2px solid ${COLORS.gold}; outline-offset: 2px; }
-        ::selection { background: ${COLORS.gold}; color: #0B0B0C; }
+        select:focus, input:focus, textarea:focus { outline: 2px solid ${COLORS.magenta}; outline-offset: 1px; }
+        button:focus-visible, a:focus-visible { outline: 2px solid ${COLORS.magenta}; outline-offset: 2px; }
+        ::selection { background: ${COLORS.magenta}; color: #08060D; }
+
+        .neon-text {
+          background: linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta} 45%, ${COLORS.blue} 100%);
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          filter: drop-shadow(0 0 18px rgba(255,46,196,0.45)) drop-shadow(0 0 36px rgba(139,47,232,0.35));
+        }
+        .neon-border {
+          border: 1px solid ${COLORS.purple};
+          box-shadow: 0 0 8px rgba(139,47,232,0.55), 0 0 22px rgba(255,46,196,0.25), inset 0 0 8px rgba(139,47,232,0.15);
+        }
+        @keyframes neonPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.72; }
+        }
+        .neon-pulse { animation: neonPulse 2.4s ease-in-out infinite; }
       `}</style>
 
       <Header route={route} go={go} />
