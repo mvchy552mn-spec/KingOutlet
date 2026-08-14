@@ -334,6 +334,57 @@ async function deleteFromSupabase(imageUrl, accessToken) {
   }
 }
 
+/* ============================================================
+   SUPABASE — table "products" (persistance réelle des fiches produit)
+   ------------------------------------------------------------
+   Conversion entre le format "row" de la table Supabase (snake_case)
+   et le format "product" utilisé côté React (camelCase), + helper de
+   chargement de la liste complète depuis Supabase.
+   ============================================================ */
+
+function rowToProduct(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    brandId: row.brand_id,
+    categoryId: row.category_id,
+    reference: row.reference,
+    description: row.description || "",
+    images: row.images || [],
+    sizes: row.sizes || [],
+    colors: row.colors || [],
+    featured: !!row.featured,
+    isNew: !!row.is_new,
+    availability: row.availability !== false,
+  };
+}
+
+function productToRow(p) {
+  return {
+    name: p.name,
+    brand_id: p.brandId,
+    category_id: p.categoryId,
+    reference: p.reference,
+    description: p.description || "",
+    images: p.images || [],
+    sizes: p.sizes || [],
+    colors: p.colors || [],
+    featured: !!p.featured,
+    is_new: !!p.isNew,
+    availability: p.availability !== false,
+  };
+}
+
+async function loadProductsFromSupabase() {
+  const client = await getSupabaseAuthClient();
+  const { data, error } = await client
+    .from("products")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(rowToProduct);
+}
+
 function makeProduct(id, name, brandId, categoryId, ref, seedBase, opts = {}) {
   const nPhotos = opts.photos || 4;
   return {
@@ -1231,7 +1282,7 @@ function AdminLogin({ onSignedIn }) {
   );
 }
 
-function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus, onSignOut }) {
+function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus, onSignOut, onReloadProducts }) {
   const [tab, setTab] = useState("products");
   const [editing, setEditing] = useState(null);
   const [editingBrand, setEditingBrand] = useState(null);
@@ -1251,6 +1302,8 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   ];
 
   const [saveError, setSaveError] = useState("");
+  const [savingProduct, setSavingProduct] = useState(false);
+
   const saveProduct = async () => {
     if (!editing.name || !editing.brandId || !editing.categoryId || !editing.reference) return;
     setSaveError("");
@@ -1260,15 +1313,44 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
       setSaveError(err && err.message ? err.message : String(err));
       return;
     }
-    if (editing.id) {
-      setProducts((prev) => prev.map((p) => (p.id === editing.id ? editing : p)));
-    } else {
-      setProducts((prev) => [...prev, { ...editing, id: "p" + Date.now() }]);
+
+    setSavingProduct(true);
+    try {
+      const client = await getSupabaseAuthClient();
+      const row = productToRow(editing);
+      if (editing.id) {
+        const { error } = await client.from("products").update(row).eq("id", editing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await client.from("products").insert(row);
+        if (error) throw error;
+      }
+    } catch (err) {
+      console.error("Enregistrement produit échoué:", err);
+      setSaveError("Erreur Supabase : " + (err && err.message ? err.message : String(err)));
+      setSavingProduct(false);
+      return; // le formulaire "editing" est conservé, rien n'est perdu
     }
+
+    if (onReloadProducts) {
+      await onReloadProducts();
+    }
+    setSavingProduct(false);
     setEditing(null);
   };
-  const deleteProduct = (id) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
+
+  const deleteProduct = async (id) => {
+    try {
+      await requireAdmin();
+      const client = await getSupabaseAuthClient();
+      const { error } = await client.from("products").delete().eq("id", id);
+      if (error) throw error;
+      if (onReloadProducts) {
+        await onReloadProducts();
+      }
+    } catch (err) {
+      console.error("Suppression produit échouée:", err && err.message ? err.message : err);
+    }
     setConfirmDelete(null);
   };
 
@@ -1417,7 +1499,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
         )}
       </div>
       <p className="text-sm mb-8" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-        Les modifications sont sauvegardées automatiquement et restent disponibles après actualisation de la page.
+        Les produits sont enregistrés directement dans Supabase et restent disponibles après actualisation de la page, changement d'appareil ou reconnexion.
       </p>
 
       <div className="flex gap-2 mb-8 border-b" style={{ borderColor: COLORS.line }}>
@@ -1681,7 +1763,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
             </div>
           )}
           <div className="mt-8 flex gap-3">
-            <SolidButton onClick={saveProduct}>Enregistrer le produit</SolidButton>
+            <SolidButton onClick={saveProduct}>{savingProduct ? "Enregistrement…" : "Enregistrer le produit"}</SolidButton>
             <GhostButton onClick={() => setEditing(null)}>Annuler</GhostButton>
           </div>
         </div>
@@ -1757,7 +1839,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(0,0,0,0.7)" }}>
           <div className="max-w-sm w-full p-6 rounded-sm neon-border" style={{ background: COLORS.surface }}>
             <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>SUPPRIMER CE PRODUIT ?</div>
-            <p className="text-sm mt-2 mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Cette action est irréversible pour cette session.</p>
+            <p className="text-sm mt-2 mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Cette action est irréversible : le produit sera supprimé de Supabase.</p>
             <div className="flex gap-3">
               <SolidButton onClick={() => deleteProduct(confirmDelete)}>Supprimer</SolidButton>
               <GhostButton onClick={() => setConfirmDelete(null)}>Annuler</GhostButton>
@@ -1859,18 +1941,35 @@ export default function App() {
     setSession(null);
   };
 
+  /* ----- Produits : source de vérité = Supabase (table "products") ----- */
+  const reloadProducts = async () => {
+    try {
+      const fresh = await loadProductsFromSupabase();
+      if (fresh.length > 0) {
+        setProducts(fresh);
+      }
+      // Si la table Supabase est vide (ex: premier lancement, avant migration),
+      // on conserve les produits de démonstration déjà en mémoire plutôt que
+      // d'afficher un catalogue vide.
+    } catch (err) {
+      console.error("Chargement des produits depuis Supabase échoué:", err);
+    }
+  };
+
+  useEffect(() => {
+    reloadProducts().finally(() => setLoaded(true));
+  }, []);
+
+  /* ----- Marques / catégories : encore en localStorage pour l'instant ----- */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const data = JSON.parse(raw);
-        if (Array.isArray(data.products)) setProducts(data.products);
         if (Array.isArray(data.brands)) setBrands(data.brands);
         if (Array.isArray(data.categories)) setCategories(data.categories);
       }
     } catch (err) {
-    } finally {
-      setLoaded(true);
     }
   }, []);
 
@@ -1878,12 +1977,12 @@ export default function App() {
     if (!loaded) return;
     setSaveStatus("enregistrement");
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ products, brands, categories }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ brands, categories }));
       setSaveStatus("enregistré");
     } catch (err) {
       setSaveStatus("erreur");
     }
-  }, [products, brands, categories, loaded]);
+  }, [brands, categories, loaded]);
 
   const go = (r) => {
     setRoute(r);
@@ -2004,6 +2103,7 @@ export default function App() {
           categories={categories} setCategories={setCategories}
           saveStatus={saveStatus}
           onSignOut={signOutAdmin}
+          onReloadProducts={reloadProducts}
         />
       )}
 
