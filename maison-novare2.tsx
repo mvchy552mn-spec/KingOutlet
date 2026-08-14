@@ -635,7 +635,12 @@ function Hero({ go }) {
         <div className="relative h-[380px] md:h-[520px]">
           <div className="absolute inset-0 grid grid-cols-2 gap-4">
             <div className="relative rounded-sm overflow-hidden translate-y-6 neon-border">
-              <img src={img("hero-a", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
+              <img
+              src={
+  c.id === "montres"
+    ? "https://cdn.phototourl.com/free/2026-08-14-4bd52cfe-91d1-4dde-b603-78f9e112d690.png"
+    : img("cat-" + c.id, 500, 650)
+}
               <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))" }} />
             </div>
             <div className="relative rounded-sm overflow-hidden -translate-y-6 neon-border">
