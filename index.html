@@ -1300,7 +1300,7 @@ function AdminLogin({ onSignedIn }) {
   );
 }
 
-function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus, onSignOut, onReloadProducts }) {
+function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus, onSignOut, onReloadProducts, productsLoading, productsError }) {
   const [tab, setTab] = useState("products");
   const [editing, setEditing] = useState(null);
   const [editingBrand, setEditingBrand] = useState(null);
@@ -1321,6 +1321,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 
   const [saveError, setSaveError] = useState("");
   const [savingProduct, setSavingProduct] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const saveProduct = async () => {
     if (!editing.name || !editing.brandId || !editing.categoryId || !editing.reference) return;
@@ -1345,7 +1346,10 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
       }
     } catch (err) {
       console.error("Enregistrement produit échoué:", err);
-      setSaveError("Erreur Supabase : " + (err && err.message ? err.message : String(err)));
+      setSaveError(
+        "Impossible d'enregistrer le produit. Erreur Supabase : " +
+          (err && err.message ? err.message : String(err))
+      );
       setSavingProduct(false);
       return; // le formulaire "editing" est conservé, rien n'est perdu
     }
@@ -1358,6 +1362,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   };
 
   const deleteProduct = async (id) => {
+    setDeleteError("");
     try {
       await requireAdmin();
       const client = await getSupabaseAuthClient();
@@ -1366,10 +1371,15 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
       if (onReloadProducts) {
         await onReloadProducts();
       }
+      setConfirmDelete(null);
     } catch (err) {
       console.error("Suppression produit échouée:", err && err.message ? err.message : err);
+      setDeleteError(
+        "Impossible de supprimer le produit. Erreur Supabase : " +
+          (err && err.message ? err.message : String(err))
+      );
+      // on laisse confirmDelete ouvert pour que l'admin voie l'erreur
     }
-    setConfirmDelete(null);
   };
 
   const openFilePicker = () => fileInputRef.current?.click();
@@ -1535,7 +1545,18 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 
       {tab === "products" && !editing && (
         <div>
+          {productsError && (
+            <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
+              {productsError}
+            </div>
+          )}
           <SolidButton onClick={() => setEditing(emptyProduct())} className="mb-6">+ Ajouter un produit</SolidButton>
+          {productsLoading && (
+            <p className="text-xs mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Chargement des produits depuis Supabase…</p>
+          )}
+          {!productsLoading && products.length === 0 && !productsError && (
+            <p className="text-xs mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Aucun produit dans Supabase pour le moment.</p>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm" style={{ fontFamily: "Inter" }}>
               <thead>
@@ -1857,10 +1878,15 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(0,0,0,0.7)" }}>
           <div className="max-w-sm w-full p-6 rounded-sm neon-border" style={{ background: COLORS.surface }}>
             <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>SUPPRIMER CE PRODUIT ?</div>
-            <p className="text-sm mt-2 mb-6" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Cette action est irréversible : le produit sera supprimé de Supabase.</p>
+            <p className="text-sm mt-2 mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Cette action est irréversible : le produit sera supprimé de Supabase.</p>
+            {deleteError && (
+              <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
+                {deleteError}
+              </div>
+            )}
             <div className="flex gap-3">
               <SolidButton onClick={() => deleteProduct(confirmDelete)}>Supprimer</SolidButton>
-              <GhostButton onClick={() => setConfirmDelete(null)}>Annuler</GhostButton>
+              <GhostButton onClick={() => { setConfirmDelete(null); setDeleteError(""); }}>Annuler</GhostButton>
             </div>
           </div>
         </div>
@@ -1911,7 +1937,14 @@ const STORAGE_KEY = "luxury-streetwear-catalog-data";
 
 function App() {
   const [route, setRoute] = useState("home");
-  const [products, setProducts] = useState(INITIAL_PRODUCTS);
+  // Supabase est la source de vérité pour les produits : on démarre à vide
+  // (pas de INITIAL_PRODUCTS ici) et on affiche un état de chargement le
+  // temps du premier SELECT. INITIAL_PRODUCTS est conservé plus haut dans
+  // le fichier au cas où il servirait ailleurs, mais n'est plus utilisé
+  // comme donnée de repli.
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [productsError, setProductsError] = useState("");
   const [brands, setBrands] = useState(BRANDS);
   const [categories, setCategories] = useState(CATEGORIES);
   const [selectedProductId, setSelectedProductId] = useState(null);
@@ -1959,23 +1992,30 @@ function App() {
     setSession(null);
   };
 
-  /* ----- Produits : source de vérité = Supabase (table "products") ----- */
+  /* ----- Produits : source de vérité = Supabase (table "products") -----
+     Important : on écrase TOUJOURS products avec le résultat du SELECT,
+     même si le tableau est vide. Aucun repli automatique sur
+     INITIAL_PRODUCTS — si Supabase renvoie 0 ligne, le catalogue doit
+     réellement afficher 0 produit. En cas d'échec réseau/RLS, on NE
+     VIDE PAS le catalogue actuellement affiché (pour éviter qu'une
+     coupure réseau transitoire fasse disparaître les produits à l'écran) ;
+     à la place, l'erreur est stockée dans productsError et affichée. */
   const reloadProducts = async () => {
+    setProductsError("");
     try {
       const fresh = await loadProductsFromSupabase();
-      if (fresh.length > 0) {
-        setProducts(fresh);
-      }
-      // Si la table Supabase est vide (ex: premier lancement, avant migration),
-      // on conserve les produits de démonstration déjà en mémoire plutôt que
-      // d'afficher un catalogue vide.
+      setProducts(fresh);
     } catch (err) {
       console.error("Chargement des produits depuis Supabase échoué:", err);
+      setProductsError(
+        "Impossible de charger les produits depuis Supabase : " +
+          (err && err.message ? err.message : String(err))
+      );
     }
   };
 
   useEffect(() => {
-    reloadProducts().finally(() => setLoaded(true));
+    reloadProducts().finally(() => { setProductsLoading(false); setLoaded(true); });
   }, []);
 
   /* ----- Marques / catégories : encore en localStorage pour l'instant ----- */
@@ -2122,6 +2162,8 @@ function App() {
           saveStatus={saveStatus}
           onSignOut={signOutAdmin}
           onReloadProducts={reloadProducts}
+          productsLoading={productsLoading}
+          productsError={productsError}
         />
       )}
 
