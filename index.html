@@ -622,60 +622,126 @@ function Header({ route, go, cartCount }) {
 
 function Hero({ go }) {
   return (
-    <section className="relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${COLORS.bg} 0%, #150F22 55%, ${COLORS.bg} 100%)` }}>
+    <section
+      className="relative overflow-hidden"
+      style={{
+        background: `linear-gradient(160deg, ${COLORS.bg} 0%, #150F22 55%, ${COLORS.bg} 100%)`,
+      }}
+    >
       <div
         aria-hidden
         className="absolute inset-0 opacity-70"
         style={{
-          background: `radial-gradient(circle at 85% 15%, rgba(255,46,196,0.28), transparent 45%), radial-gradient(circle at 10% 85%, rgba(139,47,232,0.28), transparent 45%), radial-gradient(circle at 50% 50%, rgba(46,140,255,0.10), transparent 60%)`,
+          background: `
+            radial-gradient(circle at 85% 15%, rgba(255,46,196,0.28), transparent 45%),
+            radial-gradient(circle at 10% 85%, rgba(139,47,232,0.28), transparent 45%),
+            radial-gradient(circle at 50% 50%, rgba(46,140,255,0.10), transparent 60%)
+          `,
         }}
       />
+
       <div className="max-w-7xl mx-auto px-5 md:px-8 pt-14 pb-16 md:pt-24 md:pb-24 relative grid md:grid-cols-2 gap-10 items-center">
+        {/* Texte */}
         <div className="relative z-10">
           <Eyebrow>Collection permanente</Eyebrow>
+
           <h1
             className="mt-5 leading-[0.95]"
-            style={{ fontFamily: "Anton", fontSize: "clamp(48px, 9vw, 96px)", color: COLORS.ink, letterSpacing: 0.5 }}
+            style={{
+              fontFamily: "Anton",
+              fontSize: "clamp(48px, 9vw, 96px)",
+              color: COLORS.ink,
+              letterSpacing: 0.5,
+            }}
           >
             LUXURY
             <br />
             <span className="neon-text">STREETWEAR</span>
           </h1>
-          <p className="mt-5 text-base md:text-lg max-w-md" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>
-            Une autre vision du style. Streetwear premium, matières sélectionnées, silhouettes conçues pour durer.
+
+          <p
+            className="mt-5 text-base md:text-lg max-w-md"
+            style={{
+              fontFamily: "Inter",
+              color: COLORS.inkDim,
+            }}
+          >
+            Une autre vision du style. Streetwear premium, matières
+            sélectionnées, silhouettes conçues pour durer.
           </p>
+
           <div className="mt-8 flex flex-wrap gap-4">
-            <SolidButton onClick={() => go("catalog")}>Découvrir le catalogue</SolidButton>
-            <GhostButton onClick={() => go("catalog-new")}>Voir les nouveautés</GhostButton>
+            <SolidButton onClick={() => go("catalog")}>
+              Découvrir le catalogue
+            </SolidButton>
+
+            <GhostButton onClick={() => go("catalog-new")}>
+              Voir les nouveautés
+            </GhostButton>
           </div>
         </div>
 
+        {/* Visuels */}
         <div className="relative h-[380px] md:h-[520px]">
           <div className="absolute inset-0 grid grid-cols-2 gap-4">
+            
+            {/* Image gauche */}
             <div className="relative rounded-sm overflow-hidden translate-y-6 neon-border">
-<img
-              src={
-  c.id === "2 achete une offerte"
-    ? "https://cdn.phototourl.com/free/2026-08-14-4bd52cfe-91d1-4dde-b603-78f9e112d690.png"
-    : img("cat-" + c.id, 500, 650)
-}
-              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))" }} />
+              <img
+                src="https://cdn.phototourl.com/free/2026-08-14-4bd52cfe-91d1-4dde-b603-78f9e112d690.png"
+                alt="Collection LXS"
+                className="w-full h-full object-cover"
+                onError={handleImgError}
+              />
+
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))",
+                }}
+              />
             </div>
+
+            {/* Image droite */}
             <div className="relative rounded-sm overflow-hidden -translate-y-6 neon-border">
-              <img src={img("hero-b", 500, 700)} alt="Composition produit" className="w-full h-full object-cover" onError={handleImgError} />
-              <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))" }} />
+              <img
+                src={img("hero-b", 500, 700)}
+                alt="Composition produit"
+                className="w-full h-full object-cover"
+                onError={handleImgError}
+              />
+
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(180deg, transparent 60%, rgba(8,6,13,0.7))",
+                }}
+              />
             </div>
           </div>
+
+          {/* Badge */}
           <div
-            className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 text-[11px] uppercase tracking-widest font-semibold rounded-sm"
-            style={{ background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`, color: "#08060D", fontFamily: "Inter", boxShadow: `0 0 20px rgba(255,46,196,0.5)` }}
+            className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-5 py-2 text-[11px] uppercase tracking-widest font-semibold rounded-sm whitespace-nowrap"
+            style={{
+              background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`,
+              color: "#08060D",
+              fontFamily: "Inter",
+              boxShadow: "0 0 20px rgba(255,46,196,0.5)",
+            }}
           >
             Édition permanente — LXS
           </div>
         </div>
       </div>
 
-      <div className="border-t" style={{ borderColor: COLORS.line }}>
+      {/* Informations */}
+      <div
+        className="border-t"
+        style={{ borderColor: COLORS.line }}
+      >
         <div className="max-w-7xl mx-auto px-5 md:px-8 py-5 grid grid-cols-3 gap-4 text-center">
           {[
             ["Livraison", "Partout en France"],
@@ -683,8 +749,25 @@ function Hero({ go }) {
             ["Service client", "7 jours / 7"],
           ].map(([t, s]) => (
             <div key={t}>
-              <div className="text-[11px] md:text-xs uppercase tracking-widest font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{t}</div>
-              <div className="text-[10px] md:text-xs mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{s}</div>
+              <div
+                className="text-[11px] md:text-xs uppercase tracking-widest font-semibold"
+                style={{
+                  color: COLORS.ink,
+                  fontFamily: "Inter",
+                }}
+              >
+                {t}
+              </div>
+
+              <div
+                className="text-[10px] md:text-xs mt-1"
+                style={{
+                  color: COLORS.inkDim,
+                  fontFamily: "Inter",
+                }}
+              >
+                {s}
+              </div>
             </div>
           ))}
         </div>
