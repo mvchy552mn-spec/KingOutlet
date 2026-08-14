@@ -746,7 +746,11 @@ function CategoryGrid({ go, setCategoryFilter }) {
             style={{ aspectRatio: "3/4" }}
           >
             <img
-              src={img("cat-" + c.id, 500, 650)}
+              src={
+  c.id === "montres"
+    ? "https://cdn.phototourl.com/free/2026-08-14-6811440c-aa4b-4b29-9941-88bced9e3c46.png"
+    : img("cat-" + c.id, 500, 650)
+}
               alt={c.name}
               className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
               onError={handleImgError}
