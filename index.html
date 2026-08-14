@@ -8,8 +8,10 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<!-- Conversion HEIC/HEIF (photos iPhone) → JPEG côté navigateur avant upload -->
+<!-- Conversion HEIC/HEIF (photos iPhone) -> JPEG cote navigateur avant upload -->
 <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<!-- SDK Supabase (Auth + session) - necessaire pour /admin/login -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -114,6 +116,72 @@ function handleImgError(e) {
 const SUPABASE_URL = "https://gdyavvhquzgvmsckszmi.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_E_69V4DOdDaDSw9Lf9xJ4A_Jhbo0xJX";
 const SUPABASE_BUCKET = "product-images";
+
+// ============================================================
+// ADMIN_USER_ID — UUID Supabase Auth du SEUL compte autorisé à
+// utiliser le dashboard admin et à uploader/supprimer des photos.
+// Récupérez-le dans Supabase → Authentication → Users (colonne "UID"),
+// après avoir créé votre utilisateur admin (voir instructions en fin
+// de réponse), puis collez-le ici tel quel.
+// ============================================================
+const ADMIN_USER_ID = "REPLACE_WITH_YOUR_ADMIN_UUID";
+
+// -------- Chargement paresseux du SDK Supabase (@supabase/supabase-js) --------
+// Nécessaire pour Supabase Auth (signInWithPassword, getSession, onAuthStateChange,
+// persistance de session). Comme heic2any, ce SDK n'est pas pré-importable dans cet
+// environnement d'artifact : on le charge dynamiquement via un <script> UMD, une
+// seule fois, et on le met en cache. Dans le fichier index.html autonome, il est
+// préchargé dans le <head> — ici on le détecte s'il est déjà présent.
+let supabaseSdkLoadingPromise = null;
+function loadSupabaseSdk() {
+  if (typeof window !== "undefined" && window.supabase && typeof window.supabase.createClient === "function") {
+    return Promise.resolve();
+  }
+  if (supabaseSdkLoadingPromise) return supabaseSdkLoadingPromise;
+  supabaseSdkLoadingPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Impossible de charger le SDK Supabase (Auth indisponible)"));
+    document.head.appendChild(script);
+  });
+  return supabaseSdkLoadingPromise;
+}
+
+// Client Supabase Auth, mis en cache (un seul client pour toute l'app,
+// avec persistance de session dans localStorage + rafraîchissement auto du token).
+let supabaseAuthClient = null;
+async function getSupabaseAuthClient() {
+  if (supabaseAuthClient) return supabaseAuthClient;
+  await loadSupabaseSdk();
+  supabaseAuthClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
+  return supabaseAuthClient;
+}
+
+// -------- Vérification admin côté client, à appeler AVANT toute opération --------
+// sensible (upload photo, suppression photo, sauvegarde produit). Ne fait jamais
+// confiance à un état local mis en cache : interroge Supabase pour connaître
+// l'utilisateur réellement authentifié à cet instant, puis compare son UUID à
+// ADMIN_USER_ID. Renvoie { user, accessToken } si tout est en ordre, sinon lève
+// une erreur avec un message explicite (affiché tel quel dans l'UI/le journal).
+async function requireAdmin() {
+  const client = await getSupabaseAuthClient();
+  const { data: userData, error: userError } = await client.auth.getUser();
+  if (userError || !userData || !userData.user) {
+    throw new Error("Vous devez être connecté en tant qu'administrateur.");
+  }
+  if (userData.user.id !== ADMIN_USER_ID) {
+    throw new Error("Accès refusé : ce compte n'est pas autorisé comme administrateur.");
+  }
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError || !sessionData || !sessionData.session) {
+    throw new Error("Session expirée, veuillez vous reconnecter.");
+  }
+  return { user: userData.user, accessToken: sessionData.session.access_token };
+}
 
 // Formats acceptés dans le sélecteur de fichiers et lors de l'upload.
 // HEIC/HEIF (format par défaut des photos iPhone) sont convertis en JPEG
@@ -265,8 +333,18 @@ function makeStoragePath(realType) {
 // Renvoie { publicUrl, path, steps } où "steps" trace chaque étape pour le
 // panneau de debug (voir DEBUG SYSTEM plus bas) : "selection", "conversion",
 // "connexion", "upload", "url".
-async function uploadToSupabase(file, onStep) {
+//
+// accessToken : le jeton de session Supabase Auth de l'administrateur connecté
+// (obtenu via requireAdmin()). L'upload est envoyé authentifié avec CE jeton
+// (Authorization: Bearer <access_token>), et non plus avec la clé publique —
+// c'est ce qui permet aux policies RLS Storage de vérifier auth.uid().
+async function uploadToSupabase(file, accessToken, onStep) {
   const trace = (step, ok, detail) => onStep && onStep(step, ok, detail);
+
+  if (!accessToken) {
+    trace("connexion", false, "Vous devez être connecté en tant qu'administrateur.");
+    throw new Error("Vous devez être connecté en tant qu'administrateur.");
+  }
 
   trace("selection", true, `${file.name || "(sans nom)"} — type déclaré: "${file.type || "(vide)"}"`);
 
@@ -314,7 +392,7 @@ async function uploadToSupabase(file, onStep) {
       headers: {
         "Content-Type": finalType,
         "apikey": SUPABASE_PUBLISHABLE_KEY,
-        "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        "Authorization": `Bearer ${accessToken}`,
         "x-upsert": "false",
       },
       body: usableFile,
@@ -359,15 +437,21 @@ function extractSupabasePath(imageUrl) {
 }
 
 // Suppression réelle du fichier dans Supabase Storage.
-async function deleteFromSupabase(imageUrl) {
+// accessToken : jeton de session admin (voir requireAdmin()) — requis pour que
+// la policy RLS DELETE (authenticated + auth.uid() = admin) autorise l'opération.
+async function deleteFromSupabase(imageUrl, accessToken) {
   const path = extractSupabasePath(imageUrl);
   if (!path) return; // pas une URL Supabase (ex: placeholder de démo) → rien à supprimer côté Storage
+  if (!accessToken) {
+    console.error("Suppression Supabase Storage refusée : administrateur non authentifié.");
+    return;
+  }
   const deleteUrl = `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${path}`;
   const res = await fetch(deleteUrl, {
     method: "DELETE",
     headers: {
       "apikey": SUPABASE_PUBLISHABLE_KEY,
-      "Authorization": `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+      "Authorization": `Bearer ${accessToken}`,
     },
   });
   if (!res.ok) {
@@ -1179,7 +1263,83 @@ function emptyProduct() {
   };
 }
 
-function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus }) {
+/* ---------------- Admin login (Supabase Auth) ---------------- */
+
+function AdminLogin({ onSignedIn }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const client = await getSupabaseAuthClient();
+      const { data, error: signInError } = await client.auth.signInWithPassword({ email, password });
+      if (signInError) {
+        // Message d'erreur réel renvoyé par Supabase Auth (ex: "Invalid login
+        // credentials"), jamais un message générique.
+        throw new Error(signInError.message || "Authentication error");
+      }
+      if (!data || !data.user) {
+        throw new Error("Authentication error");
+      }
+      if (data.user.id !== ADMIN_USER_ID) {
+        // On déconnecte immédiatement tout compte qui n'est pas l'admin désigné.
+        await client.auth.signOut();
+        throw new Error("Unauthorized : ce compte n'est pas administrateur.");
+      }
+      onSignedIn();
+    } catch (err) {
+      setError(err && err.message ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="max-w-sm mx-auto px-5 py-20">
+      <Eyebrow>Accès restreint</Eyebrow>
+      <h1 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: 32, color: COLORS.ink }}>ADMIN — CONNEXION</h1>
+      <form onSubmit={submit} className="space-y-4">
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Email</label>
+          <input
+            required
+            type="email"
+            autoComplete="username"
+            className="w-full px-3 py-2 text-sm rounded-sm"
+            style={selectStyle}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Mot de passe</label>
+          <input
+            required
+            type="password"
+            autoComplete="current-password"
+            className="w-full px-3 py-2 text-sm rounded-sm"
+            style={selectStyle}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+        {error && (
+          <div className="text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#C97C7C", fontFamily: "Inter" }}>
+            {error}
+          </div>
+        )}
+        <SolidButton className="w-full">{loading ? "Connexion…" : "Se connecter"}</SolidButton>
+      </form>
+    </section>
+  );
+}
+
+function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus, onSignOut }) {
   const [tab, setTab] = useState("products");
   const [editing, setEditing] = useState(null); // product being edited, or emptyProduct()
   const [editingBrand, setEditingBrand] = useState(null);
@@ -1203,8 +1363,16 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   ];
 
   /* -------- product CRUD -------- */
-  const saveProduct = () => {
+  const [saveError, setSaveError] = useState("");
+  const saveProduct = async () => {
     if (!editing.name || !editing.brandId || !editing.categoryId || !editing.reference) return;
+    setSaveError("");
+    try {
+      await requireAdmin();
+    } catch (err) {
+      setSaveError(err && err.message ? err.message : String(err));
+      return;
+    }
     if (editing.id) {
       setProducts((prev) => prev.map((p) => (p.id === editing.id ? editing : p)));
     } else {
@@ -1231,6 +1399,18 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     setUploadStatus("uploading");
     setDebugLog([]);
 
+    // Vérification admin AVANT tout upload : on récupère un access_token frais
+    // (jamais celui d'un état local potentiellement périmé).
+    let accessToken;
+    try {
+      ({ accessToken } = await requireAdmin());
+    } catch (err) {
+      const detail = err && err.message ? err.message : String(err);
+      setDebugLog([{ fileName: "—", step: "connexion", ok: false, detail }]);
+      setUploadStatus("done");
+      return;
+    }
+
     const newUrls = [];
     const fileLogs = []; // logs accumulés pendant cet appel (setDebugLog est asynchrone)
 
@@ -1242,7 +1422,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
           setDebugLog((prev) => [...prev, { fileName, step, ok, detail }]);
         };
         try {
-          const uploaded = await uploadToSupabase(file, onStep);
+          const uploaded = await uploadToSupabase(file, accessToken, onStep);
           newUrls.push(uploaded.publicUrl);
           // TODO SUPABASE: insérer ici une ligne dans product_images
           // { product_id: editing.id, image_url: uploaded.publicUrl, sort_order: ..., is_primary: ... }
@@ -1287,7 +1467,12 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     setEditing((e) => ({ ...e, images: e.images.filter((_, i) => i !== idx) }));
     // TODO SUPABASE: supprimer aussi la ligne product_images correspondante
     // (ex: supabase.from('product_images').delete().eq('image_url', url)).
-    await deleteFromSupabase(url);
+    try {
+      const { accessToken } = await requireAdmin();
+      await deleteFromSupabase(url, accessToken);
+    } catch (err) {
+      console.error("Suppression refusée :", err && err.message ? err.message : err);
+    }
   };
 
   const setPrimaryImage = (idx) => {
@@ -1349,7 +1534,14 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 
   return (
     <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
-      <Eyebrow>Back-office</Eyebrow>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <Eyebrow>Back-office</Eyebrow>
+        {onSignOut && (
+          <button onClick={onSignOut} className="text-[11px] uppercase tracking-widest" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+            Se déconnecter
+          </button>
+        )}
+      </div>
       <div className="flex items-center gap-3 flex-wrap mt-3 mb-2">
         <h1 style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,40px)", color: COLORS.ink }}>ADMINISTRATION</h1>
         {saveStatus && (
@@ -1625,6 +1817,11 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
             </div>
           </div>
 
+          {saveError && (
+            <div className="mt-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#C97C7C", fontFamily: "Inter" }}>
+              {saveError}
+            </div>
+          )}
           <div className="mt-8 flex gap-3">
             <SolidButton onClick={saveProduct}>Enregistrer le produit</SolidButton>
             <GhostButton onClick={() => setEditing(null)}>Annuler</GhostButton>
@@ -1768,6 +1965,50 @@ function App() {
   const [loaded, setLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState(""); // "", "enregistrement", "enregistré", "erreur"
 
+  // -------- Session Supabase Auth (admin) --------
+  // authChecked : évite un flash de l'écran de connexion pendant la toute
+  // première vérification de session au chargement de la page.
+  // session : session Supabase Auth actuelle (ou null si non connecté).
+  const [session, setSession] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const isAdmin = !!(session && session.user && session.user.id === ADMIN_USER_ID);
+
+  useEffect(() => {
+    let unsubscribe = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const client = await getSupabaseAuthClient();
+        const { data } = await client.auth.getSession();
+        if (!cancelled) setSession(data.session || null);
+        const { data: sub } = client.auth.onAuthStateChange((_event, newSession) => {
+          setSession(newSession || null);
+        });
+        unsubscribe = () => sub.subscription.unsubscribe();
+      } catch (err) {
+        // SDK indisponible (ex: réseau bloqué) — l'admin restera sur l'écran
+        // de connexion, avec un message d'erreur affiché s'il tente de se connecter.
+        console.error("Supabase Auth indisponible:", err);
+      } finally {
+        if (!cancelled) setAuthChecked(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  const signOutAdmin = async () => {
+    try {
+      const client = await getSupabaseAuthClient();
+      await client.auth.signOut();
+    } catch (err) {
+      console.error("Déconnexion échouée:", err);
+    }
+    setSession(null);
+  };
+
   // Load any previously saved catalog data once, on first mount.
   // This is what makes admin edits (including added image URLs) survive a page refresh.
   useEffect(() => {
@@ -1883,12 +2124,23 @@ function App() {
 
       {route === "contact" && <ContactPage />}
 
-      {route === "admin" && (
+      {route === "admin" && !authChecked && (
+        <section className="max-w-7xl mx-auto px-5 md:px-8 py-20 text-center">
+          <p className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Vérification de la session…</p>
+        </section>
+      )}
+
+      {route === "admin" && authChecked && !isAdmin && (
+        <AdminLogin onSignedIn={() => { /* onAuthStateChange met déjà à jour session */ }} />
+      )}
+
+      {route === "admin" && authChecked && isAdmin && (
         <AdminDashboard
           products={products} setProducts={setProducts}
           brands={brands} setBrands={setBrands}
           categories={categories} setCategories={setCategories}
           saveStatus={saveStatus}
+          onSignOut={signOutAdmin}
         />
       )}
 
@@ -1896,6 +2148,7 @@ function App() {
     </div>
   );
 }
+
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
