@@ -450,11 +450,11 @@ async function loadProductsFromSupabase() {
 }
 
 /* ============================================================
-   SUPABASE — table "Brands" (persistance réelle des marques)
+   SUPABASE — table "brands" (persistance réelle des marques)
    ------------------------------------------------------------
    Même logique que pour les produits : conversion row <-> objet
    React, + helper de chargement de la liste complète des marques
-   depuis Supabase. La table s'appelle "Brands" côté Supabase.
+   depuis Supabase. La table s'appelle "brands" côté Supabase.
    ============================================================ */
 
 function rowToBrand(row) {
@@ -475,7 +475,7 @@ function brandToRow(b) {
 async function loadBrandsFromSupabase() {
   const client = await getSupabaseAuthClient();
   const { data, error } = await client
-    .from("Brands")
+    .from("brands")
     .select("*")
     .order("name", { ascending: true });
   if (error) throw error;
@@ -1986,10 +1986,10 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
       const client = await getSupabaseAuthClient();
       const row = brandToRow(editingBrand);
       if (editingBrand.id) {
-        const { error } = await client.from("Brands").update(row).eq("id", editingBrand.id);
+        const { error } = await client.from("brands").update(row).eq("id", editingBrand.id);
         if (error) throw error;
       } else {
-        const { error } = await client.from("Brands").insert(row);
+        const { error } = await client.from("brands").insert(row);
         if (error) throw error;
       }
     } catch (err) {
@@ -2014,7 +2014,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     try {
       await requireAdmin();
       const client = await getSupabaseAuthClient();
-      const { error } = await client.from("Brands").delete().eq("id", id);
+      const { error } = await client.from("brands").delete().eq("id", id);
       if (error) throw error;
       if (onReloadBrands) {
         await onReloadBrands();
@@ -2639,7 +2639,7 @@ function App() {
     }
   };
 
-  /* ----- Marques : source de vérité = Supabase (table "Brands") -----
+  /* ----- Marques : source de vérité = Supabase (table "brands") -----
      Même logique que pour les produits : le tableau "brands" est
      entièrement piloté par Supabase. En cas d'échec réseau/RLS, on
      conserve la liste de marques actuellement affichée et on stocke
@@ -2665,7 +2665,7 @@ function App() {
 
   /* ----- Catégories : encore en localStorage pour l'instant -----
      Les marques ne sont plus lues/écrites ici : elles viennent
-     exclusivement de Supabase (table "Brands", voir reloadBrands
+     exclusivement de Supabase (table "brands", voir reloadBrands
      ci-dessus). Seules les catégories restent gérées en local. */
   useEffect(() => {
     try {
