@@ -18,6 +18,7 @@
 <script type="text/babel" data-type="module">
 const { useState, useMemo, useRef, useEffect } = React;
 
+
 /* ============================================================
    LUXURY STREETWEAR — plateforme catalogue premium
    Palette : noir profond #08060D / violet électrique / magenta néon /
@@ -446,6 +447,39 @@ async function loadProductsFromSupabase() {
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data || []).map(rowToProduct);
+}
+
+/* ============================================================
+   SUPABASE — table "Brands" (persistance réelle des marques)
+   ------------------------------------------------------------
+   Même logique que pour les produits : conversion row <-> objet
+   React, + helper de chargement de la liste complète des marques
+   depuis Supabase. La table s'appelle "Brands" côté Supabase.
+   ============================================================ */
+
+function rowToBrand(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || "",
+  };
+}
+
+function brandToRow(b) {
+  return {
+    name: b.name,
+    description: b.description || "",
+  };
+}
+
+async function loadBrandsFromSupabase() {
+  const client = await getSupabaseAuthClient();
+  const { data, error } = await client
+    .from("Brands")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(rowToBrand);
 }
 
 function makeProduct(id, name, brandId, categoryId, ref, seedBase, opts = {}) {
@@ -1748,7 +1782,7 @@ function AdminLogin({ onSignedIn }) {
   );
 }
 
-function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus, onSignOut, onReloadProducts, productsLoading, productsError }) {
+function AdminDashboard({ products, setProducts, brands, setBrands, categories, setCategories, saveStatus, onSignOut, onReloadProducts, productsLoading, productsError, onReloadBrands, brandsLoading, brandsError }) {
   const [tab, setTab] = useState("products");
   const [editing, setEditing] = useState(null);
   const [editingBrand, setEditingBrand] = useState(null);
@@ -1770,6 +1804,11 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   const [saveError, setSaveError] = useState("");
   const [savingProduct, setSavingProduct] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+
+  const [saveErrorBrand, setSaveErrorBrand] = useState("");
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [deleteErrorBrand, setDeleteErrorBrand] = useState("");
+  const [confirmDeleteBrand, setConfirmDeleteBrand] = useState(null);
 
   const saveProduct = async () => {
     if (!editing.name || !editing.brandId || !editing.categoryId || !editing.reference) return;
@@ -1932,17 +1971,64 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
     });
   };
 
-  const saveBrand = () => {
+  const saveBrand = async () => {
     if (!editingBrand.name) return;
-    if (editingBrand.id) {
-      setBrands((prev) => prev.map((b) => (b.id === editingBrand.id ? editingBrand : b)));
-    } else {
-      const id = editingBrand.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      setBrands((prev) => [...prev, { ...editingBrand, id }]);
+    setSaveErrorBrand("");
+    try {
+      await requireAdmin();
+    } catch (err) {
+      setSaveErrorBrand(err && err.message ? err.message : String(err));
+      return;
     }
+
+    setSavingBrand(true);
+    try {
+      const client = await getSupabaseAuthClient();
+      const row = brandToRow(editingBrand);
+      if (editingBrand.id) {
+        const { error } = await client.from("Brands").update(row).eq("id", editingBrand.id);
+        if (error) throw error;
+      } else {
+        const { error } = await client.from("Brands").insert(row);
+        if (error) throw error;
+      }
+    } catch (err) {
+      console.error("Enregistrement marque échoué:", err);
+      setSaveErrorBrand(
+        "Impossible d'enregistrer la marque. Erreur Supabase : " +
+          (err && err.message ? err.message : String(err))
+      );
+      setSavingBrand(false);
+      return; // le formulaire "editingBrand" est conservé, rien n'est perdu
+    }
+
+    if (onReloadBrands) {
+      await onReloadBrands();
+    }
+    setSavingBrand(false);
     setEditingBrand(null);
   };
-  const deleteBrand = (id) => setBrands((prev) => prev.filter((b) => b.id !== id));
+
+  const deleteBrand = async (id) => {
+    setDeleteErrorBrand("");
+    try {
+      await requireAdmin();
+      const client = await getSupabaseAuthClient();
+      const { error } = await client.from("Brands").delete().eq("id", id);
+      if (error) throw error;
+      if (onReloadBrands) {
+        await onReloadBrands();
+      }
+      setConfirmDeleteBrand(null);
+    } catch (err) {
+      console.error("Suppression marque échouée:", err && err.message ? err.message : err);
+      setDeleteErrorBrand(
+        "Impossible de supprimer la marque. Erreur Supabase : " +
+          (err && err.message ? err.message : String(err))
+      );
+      // on laisse confirmDeleteBrand ouvert pour que l'admin voie l'erreur
+    }
+  };
 
   const saveCategory = () => {
     if (!editingCategory.name) return;
@@ -1975,7 +2061,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
         )}
       </div>
       <p className="text-sm mb-8" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-        Les produits sont enregistrés directement dans Supabase et restent disponibles après actualisation de la page, changement d'appareil ou reconnexion.
+        Les produits et les marques sont enregistrés directement dans Supabase et restent disponibles après actualisation de la page, changement d'appareil ou reconnexion.
       </p>
 
       <div className="flex gap-2 mb-8 border-b" style={{ borderColor: COLORS.line }}>
@@ -2313,7 +2399,18 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 
       {tab === "brands" && !editingBrand && (
         <div>
+          {brandsError && (
+            <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
+              {brandsError}
+            </div>
+          )}
           <SolidButton onClick={() => setEditingBrand({ id: null, name: "", description: "" })} className="mb-6">+ Ajouter une marque</SolidButton>
+          {brandsLoading && (
+            <p className="text-xs mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Chargement des marques depuis Supabase…</p>
+          )}
+          {!brandsLoading && brands.length === 0 && !brandsError && (
+            <p className="text-xs mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Aucune marque dans Supabase pour le moment.</p>
+          )}
           <div className="grid sm:grid-cols-2 gap-4">
             {brands.map((b) => (
               <div key={b.id} className="p-4 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
@@ -2322,7 +2419,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 <div className="text-xs mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{products.filter((p) => p.brandId === b.id).length} produit(s)</div>
                 <div className="flex gap-3 mt-3">
                   <button onClick={() => setEditingBrand(b)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta }}>Modifier</button>
-                  <button onClick={() => deleteBrand(b.id)} className="text-xs uppercase tracking-widest" style={{ color: "#FF5C7A" }}>Supprimer</button>
+                  <button onClick={() => setConfirmDeleteBrand(b.id)} className="text-xs uppercase tracking-widest" style={{ color: "#FF5C7A" }}>Supprimer</button>
                 </div>
               </div>
             ))}
@@ -2337,8 +2434,13 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
           <input className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingBrand.name} onChange={(e) => setEditingBrand({ ...editingBrand, name: e.target.value })} />
           <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Description</label>
           <textarea rows={3} className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingBrand.description} onChange={(e) => setEditingBrand({ ...editingBrand, description: e.target.value })} />
+          {saveErrorBrand && (
+            <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
+              {saveErrorBrand}
+            </div>
+          )}
           <div className="flex gap-3">
-            <SolidButton onClick={saveBrand}>Enregistrer</SolidButton>
+            <SolidButton onClick={saveBrand}>{savingBrand ? "Enregistrement…" : "Enregistrer"}</SolidButton>
             <GhostButton onClick={() => setEditingBrand(null)}>Annuler</GhostButton>
           </div>
         </div>
@@ -2394,6 +2496,24 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
           </div>
         </div>
       )}
+
+      {confirmDeleteBrand && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "rgba(0,0,0,0.7)" }}>
+          <div className="max-w-sm w-full p-6 rounded-sm neon-border" style={{ background: COLORS.surface }}>
+            <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>SUPPRIMER CETTE MARQUE ?</div>
+            <p className="text-sm mt-2 mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Cette action est irréversible : la marque sera supprimée de Supabase.</p>
+            {deleteErrorBrand && (
+              <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
+                {deleteErrorBrand}
+              </div>
+            )}
+            <div className="flex gap-3">
+              <SolidButton onClick={() => deleteBrand(confirmDeleteBrand)}>Supprimer</SolidButton>
+              <GhostButton onClick={() => { setConfirmDeleteBrand(null); setDeleteErrorBrand(""); }}>Annuler</GhostButton>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -2440,15 +2560,17 @@ const STORAGE_KEY = "luxury-streetwear-catalog-data";
 
 function App() {
   const [route, setRoute] = useState("home");
-  // Supabase est la source de vérité pour les produits : on démarre à vide
-  // (pas de INITIAL_PRODUCTS ici) et on affiche un état de chargement le
-  // temps du premier SELECT. INITIAL_PRODUCTS est conservé plus haut dans
-  // le fichier au cas où il servirait ailleurs, mais n'est plus utilisé
-  // comme donnée de repli.
+  // Supabase est la source de vérité pour les produits ET les marques :
+  // on démarre à vide (pas de INITIAL_PRODUCTS / BRANDS ici) et on affiche
+  // un état de chargement le temps du premier SELECT. INITIAL_PRODUCTS et
+  // BRANDS sont conservés plus haut dans le fichier au cas où ils
+  // serviraient ailleurs, mais ne sont plus utilisés comme donnée de repli.
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
   const [productsError, setProductsError] = useState("");
-  const [brands, setBrands] = useState(BRANDS);
+  const [brands, setBrands] = useState([]);
+  const [brandsLoading, setBrandsLoading] = useState(true);
+  const [brandsError, setBrandsError] = useState("");
   const [categories, setCategories] = useState(CATEGORIES);
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -2517,17 +2639,39 @@ function App() {
     }
   };
 
+  /* ----- Marques : source de vérité = Supabase (table "Brands") -----
+     Même logique que pour les produits : le tableau "brands" est
+     entièrement piloté par Supabase. En cas d'échec réseau/RLS, on
+     conserve la liste de marques actuellement affichée et on stocke
+     l'erreur dans brandsError plutôt que de vider la liste. */
+  const reloadBrands = async () => {
+    setBrandsError("");
+    try {
+      const fresh = await loadBrandsFromSupabase();
+      setBrands(fresh);
+    } catch (err) {
+      console.error("Chargement des marques depuis Supabase échoué:", err);
+      setBrandsError(
+        "Impossible de charger les marques depuis Supabase : " +
+          (err && err.message ? err.message : String(err))
+      );
+    }
+  };
+
   useEffect(() => {
     reloadProducts().finally(() => { setProductsLoading(false); setLoaded(true); });
+    reloadBrands().finally(() => { setBrandsLoading(false); });
   }, []);
 
-  /* ----- Marques / catégories : encore en localStorage pour l'instant ----- */
+  /* ----- Catégories : encore en localStorage pour l'instant -----
+     Les marques ne sont plus lues/écrites ici : elles viennent
+     exclusivement de Supabase (table "Brands", voir reloadBrands
+     ci-dessus). Seules les catégories restent gérées en local. */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const data = JSON.parse(raw);
-        if (Array.isArray(data.brands)) setBrands(data.brands);
         if (Array.isArray(data.categories)) setCategories(data.categories);
       }
     } catch (err) {
@@ -2538,12 +2682,12 @@ function App() {
     if (!loaded) return;
     setSaveStatus("enregistrement");
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ brands, categories }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ categories }));
       setSaveStatus("enregistré");
     } catch (err) {
       setSaveStatus("erreur");
     }
-  }, [brands, categories, loaded]);
+  }, [categories, loaded]);
 
   const go = (r) => {
     setRoute(r);
@@ -2680,6 +2824,9 @@ function App() {
           onReloadProducts={reloadProducts}
           productsLoading={productsLoading}
           productsError={productsError}
+          onReloadBrands={reloadBrands}
+          brandsLoading={brandsLoading}
+          brandsError={brandsError}
         />
       )}
 
