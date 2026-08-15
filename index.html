@@ -685,41 +685,85 @@ function SolidButton({ children, onClick, className = "" }) {
 
 /* ---------------- Header ---------------- */
 
-function Header({ route, go, cartCount }) {
+function Header({ route, go, cartCount, setCategoryFilter, setSelectedBrandId, onOpenCart }) {
   const [open, setOpen] = useState(false);
-  const links = [
-    ["home", "Accueil"],
-    ["catalog", "Catalogue"],
-    ["collections", "Collections"],
-    ["catalog-new", "Nouveautés"],
-    ["brands", "Marques"],
-    ["about", "À propos"],
-    ["contact", "Contact"],
+  const [openMenu, setOpenMenu] = useState(null); // "categories" | "brands" | null (desktop mega-menu)
+  const [mobileExpanded, setMobileExpanded] = useState(null);
+  const closeTimer = useRef(null);
+
+  const NAV = [
+    { route: "home", label: "Accueil" },
+    { route: "catalog", label: "Catalogue", dropdown: "categories" },
+    { route: "catalog-new", label: "Nouveautés" },
+    { route: "collections", label: "Collections" },
+    { route: "brands", label: "Marques", dropdown: "brands" },
+    { route: "about", label: "À propos" },
+    { route: "contact", label: "Contact" },
   ];
+
+  const openDropdown = (key) => {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    setOpenMenu(key);
+  };
+  const scheduleClose = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpenMenu(null), 160);
+  };
+
+  const goCategory = (catId) => {
+    setCategoryFilter(catId);
+    go("catalog");
+    setOpenMenu(null);
+  };
+  const goBrand = (brandId) => {
+    setSelectedBrandId(brandId);
+    go("brands");
+    setOpenMenu(null);
+  };
+
   return (
     <header
-      className="sticky top-0 z-40 border-b"
+      className="sticky top-0 z-40 border-b relative"
       style={{ background: "rgba(8,6,13,0.92)", backdropFilter: "blur(10px)", borderColor: COLORS.line }}
+      onMouseLeave={scheduleClose}
     >
       <div className="max-w-7xl mx-auto flex items-center justify-between px-5 md:px-8 h-16">
-        <button onClick={() => go("home")} className="flex flex-col items-start leading-none">
+        <button onClick={() => { go("home"); setOpenMenu(null); }} className="flex flex-col items-start leading-none">
           <span style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, color: COLORS.ink }}>LUXURY</span>
           <span className="neon-text" style={{ fontFamily: "Anton", fontSize: 20, letterSpacing: 1, marginTop: -4 }}>STREETWEAR</span>
         </button>
 
-        <nav className="hidden lg:flex items-center gap-7">
-          {links.map(([r, label]) => (
-            <button
-              key={r}
-              onClick={() => go(r)}
-              className="text-xs uppercase tracking-widest font-medium"
-              style={{
-                fontFamily: "Inter",
-                color: route === r || (r === "catalog" && route === "product") ? COLORS.magenta : COLORS.inkDim,
-              }}
+        <nav className="hidden lg:flex items-center gap-7 h-full">
+          {NAV.map((item) => (
+            <div
+              key={item.route}
+              className="h-full flex items-center"
+              onMouseEnter={() => item.dropdown && openDropdown(item.dropdown)}
             >
-              {label}
-            </button>
+              <button
+                onClick={() => { go(item.route); setOpenMenu(null); }}
+                className="text-xs uppercase tracking-widest font-medium flex items-center gap-1.5"
+                style={{
+                  fontFamily: "Inter",
+                  color:
+                    route === item.route || (item.route === "catalog" && route === "product")
+                      ? COLORS.magenta
+                      : openMenu === item.dropdown && item.dropdown
+                      ? COLORS.ink
+                      : COLORS.inkDim,
+                }}
+              >
+                {item.label}
+                {item.dropdown && (
+                  <svg
+                    width="9" height="9" viewBox="0 0 9 9" fill="none"
+                    style={{ transition: "transform .2s ease", transform: openMenu === item.dropdown ? "rotate(180deg)" : "rotate(0deg)" }}
+                  >
+                    <path d="M1 2.5L4.5 6L8 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            </div>
           ))}
         </nav>
 
@@ -727,6 +771,7 @@ function Header({ route, go, cartCount }) {
           <button onClick={() => go("admin")} className="hidden md:inline text-[11px] uppercase tracking-widest" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
             Admin
           </button>
+          <CartIconButton count={cartCount || 0} onClick={onOpenCart} />
           <button
             className="lg:hidden flex flex-col gap-1.5 p-2"
             onClick={() => setOpen((o) => !o)}
@@ -739,18 +784,124 @@ function Header({ route, go, cartCount }) {
         </div>
       </div>
 
+      {/* Méga-menu desktop */}
+      <div
+        className="hidden lg:block absolute left-0 right-0 top-full"
+        style={{
+          background: COLORS.surface,
+          borderTop: `1px solid ${COLORS.purpleDim}`,
+          borderBottom: `1px solid ${COLORS.line}`,
+          boxShadow: openMenu ? "0 26px 50px rgba(0,0,0,0.55), 0 0 24px rgba(139,47,232,0.18)" : "none",
+          opacity: openMenu ? 1 : 0,
+          visibility: openMenu ? "visible" : "hidden",
+          transform: openMenu ? "translateY(0)" : "translateY(-10px)",
+          transition: "opacity .22s ease, transform .22s ease, visibility .22s",
+          pointerEvents: openMenu ? "auto" : "none",
+        }}
+        onMouseEnter={() => openMenu && openDropdown(openMenu)}
+      >
+        <div className="max-w-7xl mx-auto px-8 py-8">
+          {openMenu === "categories" && (
+            <div className="grid grid-cols-3 xl:grid-cols-6 gap-7">
+              {CATEGORIES.map((c) => (
+                <button key={c.id} onClick={() => goCategory(c.id)} className="text-left group">
+                  <div className="text-[10px] tracking-widest" style={{ fontFamily: "IBM Plex Mono", color: COLORS.goldDim }}>{c.tag}</div>
+                  <div
+                    className="mt-1.5 text-sm uppercase tracking-wide font-semibold transition-colors"
+                    style={{ fontFamily: "Inter", color: COLORS.ink }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = COLORS.magenta)}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = COLORS.ink)}
+                  >
+                    {c.name}
+                  </div>
+                  <div className="mt-1 text-xs leading-snug" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>{c.desc}</div>
+                </button>
+              ))}
+              <button onClick={() => goCategory("all")} className="text-left col-span-3 xl:col-span-6 pt-5 mt-1 border-t" style={{ borderColor: COLORS.line }}>
+                <span className="text-xs uppercase tracking-widest font-semibold" style={{ fontFamily: "Inter", color: COLORS.magenta }}>Voir tout le catalogue →</span>
+              </button>
+            </div>
+          )}
+          {openMenu === "brands" && (
+            <div className="grid grid-cols-3 gap-7">
+              {BRANDS.map((b) => (
+                <button key={b.id} onClick={() => goBrand(b.id)} className="text-left group">
+                  <div
+                    className="text-sm uppercase tracking-wide font-semibold transition-colors"
+                    style={{ fontFamily: "Inter", color: COLORS.ink }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = COLORS.magenta)}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = COLORS.ink)}
+                  >
+                    {b.name}
+                  </div>
+                  <div className="mt-1 text-xs leading-snug" style={{ fontFamily: "Inter", color: COLORS.inkDim }}>{b.description}</div>
+                </button>
+              ))}
+              <button onClick={() => go("brands")} className="text-left col-span-3 pt-5 mt-1 border-t" style={{ borderColor: COLORS.line }}>
+                <span className="text-xs uppercase tracking-widest font-semibold" style={{ fontFamily: "Inter", color: COLORS.magenta }}>Voir toutes les marques →</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
       {open && (
         <div className="lg:hidden border-t" style={{ borderColor: COLORS.line, background: COLORS.bg }}>
           <div className="flex flex-col px-5 py-3">
-            {links.map(([r, label]) => (
-              <button
-                key={r}
-                onClick={() => { go(r); setOpen(false); }}
-                className="text-left py-3 text-sm uppercase tracking-widest border-b"
-                style={{ fontFamily: "Inter", color: route === r ? COLORS.magenta : COLORS.ink, borderColor: COLORS.line }}
-              >
-                {label}
-              </button>
+            {NAV.map((item) => (
+              <div key={item.route} className="border-b" style={{ borderColor: COLORS.line }}>
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => { go(item.route); setOpen(false); }}
+                    className="flex-1 text-left py-3 text-sm uppercase tracking-widest"
+                    style={{ fontFamily: "Inter", color: route === item.route ? COLORS.magenta : COLORS.ink }}
+                  >
+                    {item.label}
+                  </button>
+                  {item.dropdown && (
+                    <button
+                      onClick={() => setMobileExpanded((m) => (m === item.dropdown ? null : item.dropdown))}
+                      className="p-3"
+                      aria-label="Ouvrir le sous-menu"
+                    >
+                      <svg
+                        width="11" height="11" viewBox="0 0 9 9" fill="none"
+                        style={{ transition: "transform .2s ease", transform: mobileExpanded === item.dropdown ? "rotate(180deg)" : "rotate(0deg)" }}
+                      >
+                        <path d="M1 2.5L4.5 6L8 2.5" stroke={COLORS.inkDim} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {item.dropdown === "categories" && mobileExpanded === "categories" && (
+                  <div className="pb-3 pl-3 flex flex-col gap-2.5">
+                    {CATEGORIES.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => { goCategory(c.id); setOpen(false); }}
+                        className="text-left text-xs uppercase tracking-wide"
+                        style={{ fontFamily: "Inter", color: COLORS.inkDim }}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {item.dropdown === "brands" && mobileExpanded === "brands" && (
+                  <div className="pb-3 pl-3 flex flex-col gap-2.5">
+                    {BRANDS.map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={() => { goBrand(b.id); setOpen(false); }}
+                        className="text-left text-xs uppercase tracking-wide"
+                        style={{ fontFamily: "Inter", color: COLORS.inkDim }}
+                      >
+                        {b.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ))}
             <button
               onClick={() => { go("admin"); setOpen(false); }}
@@ -955,6 +1106,67 @@ function Hero({ go }) {
               </div>
             </Reveal>
           ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Brand marquee — bandeau défilant, noms de marques en texte seul ---------------- */
+
+const MARQUEE_BRANDS = [
+  "Louis Vuitton", "Gucci", "Prada", "Dior", "Moncler", "Burberry", "Balenciaga",
+  "Saint Laurent", "Givenchy", "Fendi", "Versace", "Dolce & Gabbana", "Valentino",
+  "Off-White", "Stone Island", "Palm Angels", "Amiri", "Alexander McQueen",
+  "Maison Margiela", "Jacquemus",
+];
+
+function BrandMarquee() {
+  const renderRow = (hidden) => (
+    <div className="flex items-center" aria-hidden={hidden}>
+      {MARQUEE_BRANDS.map((name, i) => (
+        <span key={name + i} className="flex items-center shrink-0">
+          <span
+            className="text-sm md:text-base uppercase"
+            style={{ fontFamily: "Inter", fontWeight: 500, letterSpacing: "0.22em", color: COLORS.inkDim }}
+          >
+            {name}
+          </span>
+          <span
+            className="mx-7 md:mx-10 inline-block rounded-full shrink-0"
+            style={{ width: 4, height: 4, background: COLORS.purpleDim, boxShadow: `0 0 8px rgba(139,47,232,0.6)` }}
+            aria-hidden="true"
+          />
+        </span>
+      ))}
+    </div>
+  );
+
+  return (
+    <section
+      className="relative overflow-hidden border-y"
+      style={{
+        borderColor: COLORS.line,
+        background: `linear-gradient(180deg, ${COLORS.bg} 0%, #0D0916 50%, ${COLORS.bg} 100%)`,
+      }}
+      aria-label="Grandes marques présentes sur Luxury Streetwear"
+    >
+      {/* Fondus latéraux — masquent proprement l'entrée/sortie du défilement */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 left-0 w-14 sm:w-24 md:w-32 z-10"
+        style={{ background: `linear-gradient(90deg, ${COLORS.bg} 15%, transparent)` }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 right-0 w-14 sm:w-24 md:w-32 z-10"
+        style={{ background: `linear-gradient(270deg, ${COLORS.bg} 15%, transparent)` }}
+      />
+
+      <div className="brand-marquee-wrap py-6 md:py-7 overflow-hidden">
+        <div className="brand-marquee-track flex items-center whitespace-nowrap">
+          {renderRow(false)}
+          {renderRow(true)}
         </div>
       </div>
     </section>
@@ -1281,11 +1493,11 @@ function ProductGallery({ product }) {
 
   return (
     <div>
-      {/* Image principale — cadre premium, produit dominant, fond propre */}
+      {/* Image principale — carrée, cadrage net, produit centré sans vide excessif */}
       <div
         className="relative rounded-lg overflow-hidden cursor-zoom-in select-none"
         style={{
-          aspectRatio: "4/5",
+          aspectRatio: "1/1",
           background: `radial-gradient(120% 100% at 50% 8%, ${COLORS.surface2} 0%, ${COLORS.surface} 55%, #0C0913 100%)`,
           boxShadow: `0 0 0 1px ${COLORS.line}, 0 30px 60px -30px rgba(0,0,0,0.7)`,
         }}
@@ -1293,7 +1505,7 @@ function ProductGallery({ product }) {
         onTouchEnd={onTouchEnd}
         onClick={() => setZoomOpen(true)}
       >
-        <div className="absolute inset-0 flex items-center justify-center p-6 sm:p-10">
+        <div className="absolute inset-0 flex items-center justify-center p-5 sm:p-7">
           <img
             src={product.images[displayImg]}
             alt={product.name}
@@ -1325,23 +1537,23 @@ function ProductGallery({ product }) {
         </div>
       </div>
 
-      {/* Miniatures — indicateur discret, pas de gros contour */}
+      {/* Miniatures — carrées, nettes, cadrage cohérent avec l'image principale */}
       {product.images.length > 1 && (
-        <div className="flex gap-2.5 mt-4 overflow-x-auto pb-1">
+        <div className="flex gap-3 mt-4 overflow-x-auto pb-1">
           {product.images.map((im, i) => (
             <button
               key={i}
               onClick={() => goTo(i)}
               className="relative shrink-0 rounded-md overflow-hidden transition-all duration-200"
               style={{
-                width: 64,
-                height: 80,
-                background: COLORS.surface,
+                width: 68,
+                height: 68,
+                background: `radial-gradient(120% 120% at 50% 10%, ${COLORS.surface2} 0%, ${COLORS.surface} 100%)`,
                 boxShadow: activeImg === i ? `0 0 0 2px ${COLORS.magenta}, 0 0 14px rgba(255,46,196,0.4)` : `0 0 0 1px ${COLORS.line}`,
-                opacity: activeImg === i ? 1 : 0.6,
+                opacity: activeImg === i ? 1 : 0.55,
               }}
             >
-              <img src={im} alt="" className="w-full h-full object-cover" onError={handleImgError} loading="lazy" />
+              <img src={im} alt="" className="absolute inset-0 w-full h-full object-contain p-1.5" onError={handleImgError} loading="lazy" />
             </button>
           ))}
         </div>
@@ -1390,15 +1602,76 @@ function ProductGallery({ product }) {
   );
 }
 
-function ProductPage({ product, brand, products, brands, onOpen, go }) {
+/* Accordéon compact — une section ouverte à la fois, pour éviter les pavés de texte empilés */
+function InfoAccordion({ sections, defaultOpen }) {
+  const [openId, setOpenId] = useState(defaultOpen || null);
+  return (
+    <div className="mt-7 border-t" style={{ borderColor: COLORS.line }}>
+      {sections.map((s) => {
+        const isOpen = openId === s.id;
+        return (
+          <div key={s.id} className="border-b" style={{ borderColor: COLORS.line }}>
+            <button
+              onClick={() => setOpenId(isOpen ? null : s.id)}
+              className="w-full flex items-center justify-between py-4 text-left"
+            >
+              <span className="text-xs uppercase tracking-widest font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{s.label}</span>
+              <svg
+                width="11" height="11" viewBox="0 0 9 9" fill="none"
+                style={{ transition: "transform .2s ease", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0 }}
+              >
+                <path d="M1 2.5L4.5 6L8 2.5" stroke={COLORS.inkDim} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <div
+              style={{
+                maxHeight: isOpen ? 600 : 0,
+                overflow: "hidden",
+                transition: "max-height .3s ease",
+              }}
+            >
+              <div className="pb-4 text-sm leading-relaxed" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                {s.content}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProductPage({ product, brand, products, brands, onOpen, go, onAddToCart }) {
   const [selSize, setSelSize] = useState(product.sizes[0] || null);
   const [selColor, setSelColor] = useState(product.colors[0] || null);
+  const [qty, setQty] = useState(1);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [justAdded, setJustAdded] = useState(false);
 
-  useEffect(() => { setSelSize(product.sizes[0] || null); setSelColor(product.colors[0] || null); }, [product.id]);
+  useEffect(() => { setSelSize(product.sizes[0] || null); setSelColor(product.colors[0] || null); setQty(1); setDescExpanded(false); }, [product.id]);
 
   const similar = products.filter((p) => p.id !== product.id && p.categoryId === product.categoryId).slice(0, 4);
   const categoryLabel = CATEGORIES.find((c) => c.id === product.categoryId)?.name;
   const isShoe = product.categoryId === "chaussures";
+  const isLongDesc = (product.description || "").length > 140;
+
+  const handleAddToCart = () => {
+    onAddToCart({
+      productId: product.id,
+      name: product.name,
+      brandName: brand?.name || "",
+      reference: product.reference || "",
+      price: product.price != null ? product.price : null,
+      image: product.images && product.images[0] ? product.images[0] : null,
+      size: selSize || null,
+      sizeLabel: isShoe ? "Pointure" : "Taille",
+      color: selColor || null,
+      quantity: qty,
+      categoryId: product.categoryId,
+    });
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 1800);
+  };
 
   return (
     <section className="max-w-7xl mx-auto px-5 md:px-8 py-10">
@@ -1430,7 +1703,30 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
             </div>
 
             {product.description && (
-              <p className="mt-6 text-sm leading-relaxed max-w-md" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{product.description}</p>
+              <div className="mt-6 max-w-md">
+                <p
+                  className="text-sm leading-relaxed"
+                  style={{
+                    color: COLORS.inkDim,
+                    fontFamily: "Inter",
+                    display: "-webkit-box",
+                    WebkitBoxOrient: "vertical",
+                    WebkitLineClamp: descExpanded ? "unset" : 3,
+                    overflow: descExpanded ? "visible" : "hidden",
+                  }}
+                >
+                  {product.description}
+                </p>
+                {isLongDesc && (
+                  <button
+                    onClick={() => setDescExpanded((v) => !v)}
+                    className="mt-1.5 text-xs uppercase tracking-widest font-semibold"
+                    style={{ color: COLORS.magenta, fontFamily: "Inter" }}
+                  >
+                    {descExpanded ? "Réduire ↑" : "Lire plus ↓"}
+                  </button>
+                )}
+              </div>
             )}
 
             {product.colors.length > 0 && (
@@ -1481,7 +1777,23 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
               </div>
             )}
 
-            <div className="mt-8 flex flex-wrap gap-4">
+            <div className="mt-8 flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-3 border rounded-sm px-1" style={{ borderColor: COLORS.line }}>
+                <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="w-9 h-11 text-lg" style={{ color: COLORS.ink }} aria-label="Diminuer la quantité">−</button>
+                <span className="text-sm w-5 text-center" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{qty}</span>
+                <button onClick={() => setQty((q) => q + 1)} className="w-9 h-11 text-lg" style={{ color: COLORS.ink }} aria-label="Augmenter la quantité">+</button>
+              </div>
+              <button
+                onClick={handleAddToCart}
+                disabled={!product.availability}
+                className="px-7 py-3.5 rounded-sm text-sm font-semibold uppercase tracking-wider transition-transform duration-150 hover:scale-[1.02] disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ background: justAdded ? COLORS.green : COLORS.ink, color: COLORS.bg, fontFamily: "Inter" }}
+              >
+                {justAdded ? "Ajouté ✓" : "Ajouter au panier"}
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-4">
               <SolidButton
                 onClick={() => go("contact")}
                 className="!px-8 !py-4 !text-base tracking-wider"
@@ -1491,36 +1803,35 @@ function ProductPage({ product, brand, products, brands, onOpen, go }) {
               <GhostButton onClick={() => go("catalog")}>Continuer à explorer</GhostButton>
             </div>
 
-            {/* Réassurance */}
-            <div className="mt-8 pt-6 border-t grid grid-cols-3 gap-3 text-center" style={{ borderColor: COLORS.line }}>
-              {[
-                ["🚚", "Livraison", "Partout en France"],
-                ["🤝", "Main propre", "Paris & IDF"],
-                ["💬", "Service client", "7j/7"],
-              ].map(([icon, t, s]) => (
-                <div key={t}>
-                  <div className="text-base">{icon}</div>
-                  <div className="text-[10px] uppercase tracking-widest font-semibold mt-1" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{t}</div>
-                  <div className="text-[10px] mt-0.5" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{s}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Informations complémentaires */}
-            <div className="mt-6 pt-6 border-t text-sm space-y-2" style={{ borderColor: COLORS.line, fontFamily: "Inter" }}>
-              <div className="flex justify-between">
-                <span style={{ color: COLORS.inkDim }}>Catégorie</span>
-                <span style={{ color: COLORS.ink }}>{categoryLabel}</span>
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: COLORS.inkDim }}>Marque</span>
-                <span style={{ color: COLORS.ink }}>{brand?.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: COLORS.inkDim }}>Authenticité</span>
-                <span style={{ color: COLORS.ink }}>Garantie</span>
-              </div>
-            </div>
+            {/* Détails, groupés en accordéon pour éviter le pavé de texte */}
+            <InfoAccordion
+              defaultOpen="details"
+              sections={[
+                {
+                  id: "details",
+                  label: "Détails du produit",
+                  content: (
+                    <div className="space-y-2">
+                      <div className="flex justify-between"><span>Catégorie</span><span style={{ color: COLORS.ink }}>{categoryLabel}</span></div>
+                      <div className="flex justify-between"><span>Marque</span><span style={{ color: COLORS.ink }}>{brand?.name}</span></div>
+                      <div className="flex justify-between"><span>Référence</span><span className="font-mono" style={{ color: COLORS.ink }}>{product.reference}</span></div>
+                      <div className="flex justify-between"><span>Authenticité</span><span style={{ color: COLORS.ink }}>Garantie</span></div>
+                    </div>
+                  ),
+                },
+                {
+                  id: "livraison",
+                  label: "Livraison & retours",
+                  content: (
+                    <div className="space-y-2">
+                      <div className="flex justify-between"><span>Livraison</span><span style={{ color: COLORS.ink }}>Partout en France</span></div>
+                      <div className="flex justify-between"><span>Main propre</span><span style={{ color: COLORS.ink }}>Paris & IDF</span></div>
+                      <div className="flex justify-between"><span>Service client</span><span style={{ color: COLORS.ink }}>7j/7</span></div>
+                    </div>
+                  ),
+                },
+              ]}
+            />
           </div>
         </Reveal>
       </div>
@@ -2554,6 +2865,206 @@ function Footer({ go }) {
   );
 }
 
+/* ---------------- WhatsApp — commande & question ---------------- */
+
+const WHATSAPP_NUMBER = "33607672748"; // 06 07 67 27 48 au format international, sans + ni espaces (requis par wa.me)
+const CART_STORAGE_KEY = "luxury-streetwear-cart";
+
+function whatsappLink(message) {
+  return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+}
+
+function buildWhatsAppQuestionMessage() {
+  return "Bonjour LUXURY STREETWEAR, j'aimerais avoir des informations concernant vos produits.";
+}
+
+/* Construit le message de commande uniquement à partir des données réellement
+   présentes sur chaque article du panier — aucune information n'est inventée. */
+function buildWhatsAppOrderMessage(cart) {
+  const lines = ["Bonjour LUXURY STREETWEAR,", "", "Je souhaite commander les articles suivants :", ""];
+  cart.forEach((item, i) => {
+    const titleParts = [item.name];
+    lines.push(`${i + 1}. ${item.name}${item.brandName ? " — " + item.brandName : ""}`);
+    if (item.reference) lines.push(`   Référence : ${item.reference}`);
+    if (item.size) lines.push(`   ${item.sizeLabel || "Taille"} : ${item.size}`);
+    if (item.color) lines.push(`   Couleur : ${item.color}`);
+    lines.push(`   Quantité : ${item.quantity}`);
+    if (item.price != null) lines.push(`   Prix : ${item.price} €`);
+    lines.push("");
+  });
+  lines.push(
+    "Livraison partout en France : jusqu'à 2 semaines pour les articles sur commande. Produits en stock : livraison sous 72h. Remise en main propre possible à Grenoble et dans ses environs."
+  );
+  lines.push("");
+  lines.push("Je souhaite connaître la disponibilité et les modalités de livraison.");
+  lines.push("");
+  lines.push("Merci.");
+  return lines.join("\n");
+}
+
+function WhatsAppGlyph({ size = 26, color = "#fff" }) {
+  return (
+    <svg viewBox="0 0 32 32" width={size} height={size} fill={color} aria-hidden>
+      <path d="M16.001 3C9.373 3 4 8.373 4 15c0 2.625.86 5.055 2.317 7.019L4 29l7.174-2.281A11.94 11.94 0 0 0 16.001 27C22.628 27 28 21.627 28 15S22.628 3 16.001 3zm.001 21.6c-1.844 0-3.552-.5-5.03-1.377l-.361-.213-4.259 1.355 1.379-4.152-.235-.377A9.565 9.565 0 0 1 6.4 15c0-5.294 4.307-9.6 9.6-9.6 5.292 0 9.6 4.306 9.6 9.6 0 5.294-4.308 9.6-9.598 9.6zm5.264-7.17c-.288-.144-1.704-.84-1.968-.936-.264-.096-.456-.144-.648.144-.192.288-.744.936-.912 1.128-.168.192-.336.216-.624.072-.288-.144-1.215-.448-2.314-1.428-.855-.762-1.432-1.703-1.6-1.991-.168-.288-.018-.444.126-.588.129-.128.288-.336.432-.504.144-.168.192-.288.288-.48.096-.192.048-.36-.024-.504-.072-.144-.648-1.56-.888-2.136-.234-.564-.474-.486-.648-.492-.168-.006-.36-.006-.552-.006a1.06 1.06 0 0 0-.768.36c-.264.288-1.008.984-1.008 2.4 0 1.416 1.032 2.784 1.176 2.976.144.192 2.03 3.1 4.92 4.35.688.297 1.223.474 1.641.606.69.22 1.318.189 1.814.115.553-.083 1.704-.696 1.944-1.368.24-.672.24-1.248.168-1.368-.072-.12-.264-.192-.552-.336z" />
+    </svg>
+  );
+}
+
+/* Bouton flottant — toujours accessible, envoie une question générique.
+   Se replie légèrement au-dessus des zones mobiles pour ne rien recouvrir. */
+function FloatingWhatsAppButton() {
+  return (
+    <a
+      href={whatsappLink(buildWhatsAppQuestionMessage())}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="fixed z-40 flex items-center justify-center rounded-full transition-transform duration-200 hover:scale-110 active:scale-95"
+      style={{
+        right: 18,
+        bottom: 18,
+        width: 56,
+        height: 56,
+        background: "linear-gradient(160deg, #29e074, #1fb85c)",
+        boxShadow: "0 10px 26px rgba(37,211,102,0.4), 0 0 0 1px rgba(255,255,255,0.08)",
+      }}
+      aria-label="Nous contacter sur WhatsApp"
+    >
+      <span className="absolute inset-0 rounded-full neon-pulse" style={{ boxShadow: "0 0 0 6px rgba(37,211,102,0.14)" }} aria-hidden />
+      <WhatsAppGlyph size={28} />
+    </a>
+  );
+}
+
+function CartIconButton({ count, onClick }) {
+  return (
+    <button onClick={onClick} className="relative p-2 -m-2" aria-label="Ouvrir le panier">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke={COLORS.ink} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 6h2l1.6 9.6a2 2 0 0 0 2 1.7h7.8a2 2 0 0 0 2-1.6L20 9H6.2" />
+        <circle cx="9.5" cy="20" r="1.4" fill={COLORS.ink} stroke="none" />
+        <circle cx="17" cy="20" r="1.4" fill={COLORS.ink} stroke="none" />
+      </svg>
+      {count > 0 && (
+        <span
+          className="absolute -top-1 -right-1 flex items-center justify-center rounded-full text-[10px] font-bold"
+          style={{ minWidth: 16, height: 16, padding: "0 3px", background: COLORS.magenta, color: "#fff", fontFamily: "Inter" }}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/* Panier — système minimal : liste, quantités, suppression, puis commande WhatsApp. */
+function CartDrawer({ open, onClose, cart, updateQty, removeItem, go }) {
+  const subtotal = cart.reduce((sum, it) => (it.price != null ? sum + it.price * it.quantity : sum), 0);
+  const hasPrices = cart.some((it) => it.price != null);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60]"
+      style={{ visibility: open ? "visible" : "hidden", pointerEvents: open ? "auto" : "none" }}
+      aria-hidden={!open}
+    >
+      <div
+        className="absolute inset-0 transition-opacity duration-300"
+        style={{ background: "rgba(0,0,0,0.7)", opacity: open ? 1 : 0 }}
+        onClick={onClose}
+      />
+      <div
+        className="absolute right-0 top-0 bottom-0 w-full sm:w-96 max-w-full flex flex-col transition-transform duration-300 ease-out"
+        style={{ background: COLORS.surface, borderLeft: `1px solid ${COLORS.line}`, transform: open ? "translateX(0)" : "translateX(100%)" }}
+      >
+        <div className="flex items-center justify-between px-5 py-5 border-b" style={{ borderColor: COLORS.line }}>
+          <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>PANIER {cart.length > 0 && `(${cart.length})`}</div>
+          <button onClick={onClose} style={{ color: COLORS.ink }} aria-label="Fermer le panier">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {cart.length === 0 ? (
+            <div className="py-16 text-center">
+              <div className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Votre panier est vide.</div>
+              <button
+                onClick={() => { onClose(); go("catalog"); }}
+                className="mt-4 text-xs uppercase tracking-widest font-semibold"
+                style={{ color: COLORS.magenta, fontFamily: "Inter" }}
+              >
+                Découvrir le catalogue →
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {cart.map((item) => (
+                <div key={item.cartItemId} className="flex gap-3">
+                  <div
+                    className="shrink-0 rounded-md overflow-hidden"
+                    style={{ width: 64, height: 64, background: COLORS.surface2, boxShadow: `0 0 0 1px ${COLORS.line}` }}
+                  >
+                    {item.image && (
+                      <img src={item.image} alt="" className="w-full h-full object-contain p-1.5" onError={handleImgError} loading="lazy" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-sm font-semibold leading-snug" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{item.name}</div>
+                      <button onClick={() => removeItem(item.cartItemId)} className="text-xs shrink-0" style={{ color: COLORS.inkDim }} aria-label="Retirer">✕</button>
+                    </div>
+                    {item.brandName && (
+                      <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{item.brandName}</div>
+                    )}
+                    <div className="text-[11px] mt-1 flex flex-wrap gap-x-2 gap-y-0.5" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                      {item.size && <span>{item.sizeLabel || "Taille"} : {item.size}</span>}
+                      {item.color && <span>Couleur : {item.color}</span>}
+                    </div>
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-2 border rounded-sm" style={{ borderColor: COLORS.line }}>
+                        <button onClick={() => updateQty(item.cartItemId, item.quantity - 1)} className="w-6 h-6 text-sm" style={{ color: COLORS.ink }}>−</button>
+                        <span className="text-xs w-4 text-center" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{item.quantity}</span>
+                        <button onClick={() => updateQty(item.cartItemId, item.quantity + 1)} className="w-6 h-6 text-sm" style={{ color: COLORS.ink }}>+</button>
+                      </div>
+                      {item.price != null && (
+                        <div className="text-xs font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{(item.price * item.quantity).toFixed(2)} €</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {cart.length > 0 && (
+          <div className="px-5 py-5 border-t" style={{ borderColor: COLORS.line }}>
+            {hasPrices && (
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs uppercase tracking-widest" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Sous-total</span>
+                <span className="text-base font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{subtotal.toFixed(2)} €</span>
+              </div>
+            )}
+            <a
+              href={whatsappLink(buildWhatsAppOrderMessage(cart))}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-sm text-sm font-semibold uppercase tracking-wider transition-transform duration-150 hover:scale-[1.02]"
+              style={{ background: "linear-gradient(160deg, #29e074, #1fb85c)", color: "#08110B", fontFamily: "Inter" }}
+            >
+              <WhatsAppGlyph size={19} color="#08110B" />
+              Commander via WhatsApp
+            </a>
+            <button
+              onClick={() => { onClose(); go("catalog"); }}
+              className="w-full mt-3 text-xs uppercase tracking-widest"
+              style={{ color: COLORS.inkDim, fontFamily: "Inter" }}
+            >
+              Continuer mes achats
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- App root ---------------- */
 
 const STORAGE_KEY = "luxury-streetwear-catalog-data";
@@ -2575,6 +3086,46 @@ function App() {
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedBrandId, setSelectedBrandId] = useState(null);
+
+  /* ----- Panier WhatsApp — minimal, persistant en localStorage ----- */
+  const [cart, setCart] = useState([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [cartLoaded, setCartLoaded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CART_STORAGE_KEY);
+      if (raw) setCart(JSON.parse(raw));
+    } catch (err) {}
+    setCartLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!cartLoaded) return;
+    try {
+      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+    } catch (err) {}
+  }, [cart, cartLoaded]);
+
+  const addToCart = (item) => {
+    setCart((prev) => {
+      const key = `${item.productId}__${item.size || ""}__${item.color || ""}`;
+      const existing = prev.find((it) => `${it.productId}__${it.size || ""}__${it.color || ""}` === key);
+      if (existing) {
+        return prev.map((it) => (it === existing ? { ...it, quantity: it.quantity + item.quantity } : it));
+      }
+      return [...prev, { ...item, cartItemId: key + "__" + Date.now() }];
+    });
+    setCartOpen(true);
+  };
+  const updateCartQty = (cartItemId, qty) => {
+    if (qty < 1) return;
+    setCart((prev) => prev.map((it) => (it.cartItemId === cartItemId ? { ...it, quantity: qty } : it)));
+  };
+  const removeCartItem = (cartItemId) => {
+    setCart((prev) => prev.filter((it) => it.cartItemId !== cartItemId));
+  };
+  const cartCount = cart.reduce((n, it) => n + it.quantity, 0);
 
   const [loaded, setLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
@@ -2730,6 +3281,20 @@ function App() {
         }
         .neon-pulse { animation: neonPulse 2.4s ease-in-out infinite; }
 
+        /* Bandeau marques — défilement continu, boucle parfaite (contenu dupliqué x2, translation de -50%) */
+        @keyframes brandMarqueeScroll {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+        .brand-marquee-track {
+          width: max-content;
+          animation: brandMarqueeScroll 48s linear infinite;
+          will-change: transform;
+        }
+        .brand-marquee-wrap:hover .brand-marquee-track {
+          animation-play-state: paused;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after {
             animation-duration: 0.001ms !important;
@@ -2740,10 +3305,11 @@ function App() {
         }
       `}</style>
 
-      <Header route={route} go={go} />
+      <Header route={route} go={go} setCategoryFilter={setCategoryFilter} setSelectedBrandId={setSelectedBrandId} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} />
 
       {route === "home" && (
         <>
+          <BrandMarquee />
           <Hero go={go} />
           <CategoryGrid go={go} setCategoryFilter={setCategoryFilter} />
           <section className="max-w-7xl mx-auto px-5 md:px-8 pb-16">
@@ -2789,7 +3355,7 @@ function App() {
       )}
 
       {route === "product" && selectedProduct && (
-        <ProductPage product={selectedProduct} brand={selectedBrand} products={products} brands={brands} onOpen={openProduct} go={go} />
+        <ProductPage product={selectedProduct} brand={selectedBrand} products={products} brands={brands} onOpen={openProduct} go={go} onAddToCart={addToCart} />
       )}
 
       {route === "brands" && (
@@ -2831,6 +3397,16 @@ function App() {
       )}
 
       <Footer go={go} />
+
+      <CartDrawer
+        open={cartOpen}
+        onClose={() => setCartOpen(false)}
+        cart={cart}
+        updateQty={updateCartQty}
+        removeItem={removeCartItem}
+        go={go}
+      />
+      <FloatingWhatsAppButton />
     </div>
   );
 }
