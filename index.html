@@ -632,16 +632,52 @@ async function deleteVideoFromSupabase(videoUrlOrPath, accessToken) {
    chargement de la liste complète depuis Supabase.
    ============================================================ */
 
-/* Statut de disponibilité d'un produit — deux valeurs possibles :
+/* Statut de disponibilité d'un produit — trois valeurs possibles :
    "disponible"    -> article en stock, expédiable rapidement (badge vert)
    "sur_commande"  -> article non stocké, commandable auprès du fournisseur (badge orange)
+   "indisponible"  -> article momentanément indisponible (badge rouge)
    normalizeAvailability() assure la rétrocompatibilité avec l'ancienne colonne
    booléenne "availability" (true/false) qui pouvait exister dans Supabase avant
-   l'ajout de ce statut à deux valeurs : true -> disponible, false -> sur_commande. */
+   l'ajout de ce statut : true -> disponible, false -> sur_commande. */
 function normalizeAvailability(value) {
-  if (value === "disponible" || value === "sur_commande") return value;
+  if (value === "disponible" || value === "sur_commande" || value === "indisponible") return value;
   if (value === false) return "sur_commande";
   return "disponible";
+}
+
+/* Source unique de vérité pour l'affichage de la disponibilité — badge, icône,
+   libellé et texte de livraison associé. Utilisée partout où le statut d'un
+   produit doit être affiché (cartes produits, fiche produit, panier, admin)
+   afin de garantir une formulation strictement identique sur tout le site. */
+const AVAILABILITY_INFO = {
+  disponible: {
+    label: "Disponible",
+    emoji: "🟢",
+    badgeTone: "success",
+    statusLine: "EN STOCK",
+    deliveryText: "Disponible — expédition sous 48 à 72h",
+    shortDelay: "Expédition sous 48 à 72h",
+  },
+  sur_commande: {
+    label: "Sur commande",
+    emoji: "🟠",
+    badgeTone: "warning",
+    statusLine: "SUR COMMANDE",
+    deliveryText: "Commande fournisseur — livraison estimée sous 2 à 3 semaines",
+    shortDelay: "Livraison estimée sous 2 à 3 semaines",
+  },
+  indisponible: {
+    label: "Indisponible",
+    emoji: "🔴",
+    badgeTone: "danger",
+    statusLine: "INDISPONIBLE",
+    deliveryText: "Produit momentanément indisponible",
+    shortDelay: "Produit momentanément indisponible",
+  },
+};
+
+function getAvailabilityInfo(value) {
+  return AVAILABILITY_INFO[normalizeAvailability(value)];
 }
 
 function rowToProduct(row) {
@@ -980,9 +1016,10 @@ function Badge({ children, tone = "gold" }) {
     dark: { bg: COLORS.surface2, color: COLORS.ink },
     new: { bg: COLORS.green, color: "#0F0806" },
     promo: { bg: COLORS.magenta, color: "#0F0806" },
-    /* Statut de disponibilité produit : vert = en stock, orange = sur commande */
+    /* Statut de disponibilité produit : vert = en stock, orange = sur commande, rouge = indisponible */
     success: { bg: "#3FB552", color: "#0F0806" },
     warning: { bg: "#F5A623", color: "#0F0806" },
+    danger: { bg: "#E5484D", color: "#0F0806" },
   };
   const { bg, color } = TONES[tone] || TONES.gold;
   return (
@@ -1064,7 +1101,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Quels sont les délais de livraison ?",
-    a: "Pour les produits en stock, l'expédition est effectuée sous 48 à 72 heures après paiement. Pour les produits sur commande, le délai est de 2 semaines.",
+    a: "Pour les produits en stock, l'expédition est effectuée sous 48 à 72h après paiement. Pour les produits sur commande, la livraison est estimée sous 2 à 3 semaines.",
   },
   {
     q: "Livrez-vous partout en France ?",
@@ -2103,9 +2140,10 @@ function ProductCard({ product, brand, onOpen }) {
         />
         <TagCorner />
         <div className="absolute top-3 right-3">
-          {product.availability === "disponible"
-            ? <Badge tone="success">Disponible</Badge>
-            : <Badge tone="warning">Sur commande</Badge>}
+          {(() => {
+            const info = getAvailabilityInfo(product.availability);
+            return <Badge tone={info.badgeTone}>{info.emoji} {info.label}</Badge>;
+          })()}
         </div>
       </div>
       <div className="mt-3.5">
@@ -2563,20 +2601,27 @@ function ProductPage({ product, brand, products, brands, onOpen, go, onAddToCart
   const isShoe = product.categoryId === "chaussures";
   const isLongDesc = (product.description || "").length > 140;
 
+  // Représentation du produit sous la forme utilisée par le panier — sert à la fois
+  // à l'ajout au panier et à la génération du message WhatsApp direct depuis la
+  // fiche produit. Ne contient que des informations réellement disponibles ou
+  // sélectionnées : aucune référence/taille/couleur n'est inventée.
+  const buildCartItem = () => ({
+    productId: product.id,
+    name: product.name,
+    brandName: brand?.name || "",
+    reference: product.reference || "",
+    price: product.price != null ? product.price : null,
+    image: product.images && product.images[0] ? product.images[0] : null,
+    size: selSize || null,
+    sizeLabel: isShoe ? "Pointure" : "Taille",
+    color: selColor || null,
+    quantity: qty,
+    categoryId: product.categoryId,
+    availability: normalizeAvailability(product.availability),
+  });
+
   const handleAddToCart = () => {
-    onAddToCart({
-      productId: product.id,
-      name: product.name,
-      brandName: brand?.name || "",
-      reference: product.reference || "",
-      price: product.price != null ? product.price : null,
-      image: product.images && product.images[0] ? product.images[0] : null,
-      size: selSize || null,
-      sizeLabel: isShoe ? "Pointure" : "Taille",
-      color: selColor || null,
-      quantity: qty,
-      categoryId: product.categoryId,
-    });
+    onAddToCart(buildCartItem());
     setJustAdded(true);
     setTimeout(() => setJustAdded(false), 1800);
   };
@@ -2606,9 +2651,31 @@ function ProductPage({ product, brand, products, brands, onOpen, go, onAddToCart
               {product.price != null && (
                 <span className="text-lg font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{product.price} €</span>
               )}
-              {product.availability === "disponible"
-                ? <Badge tone="success">Disponible</Badge>
-                : <Badge tone="warning">Sur commande</Badge>}
+              {(() => {
+                const info = getAvailabilityInfo(product.availability);
+                return <Badge tone={info.badgeTone}>{info.emoji} {info.label}</Badge>;
+              })()}
+            </div>
+
+            {/* Disponibilité + délai de livraison — toujours visible près des
+                informations principales du produit, texte strictement identique
+                à celui utilisé ailleurs sur le site (cartes, panier, accordéon). */}
+            <div
+              className="mt-4 text-xs sm:text-sm"
+              style={{ color: COLORS.inkDim, fontFamily: "Inter" }}
+            >
+              {(() => {
+                const info = getAvailabilityInfo(product.availability);
+                return (
+                  <span>
+                    <span className="uppercase tracking-widest font-semibold" style={{ color: COLORS.ink }}>
+                      {info.emoji} {info.statusLine}
+                    </span>
+                    {" — "}
+                    {info.deliveryText}
+                  </span>
+                );
+              })()}
             </div>
 
             {product.description && (
@@ -2702,31 +2769,75 @@ function ProductPage({ product, brand, products, brands, onOpen, go, onAddToCart
             </div>
 
             <div className="mt-4 flex flex-col sm:flex-row sm:flex-wrap gap-3 sm:gap-4">
-              <SolidButton
-                onClick={() => go("contact")}
-                className="!px-8 !py-4 !text-base tracking-wider w-full sm:w-auto whitespace-normal"
+              <a
+                href={whatsappLink(buildWhatsAppOrderMessage([buildCartItem()]))}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2.5 !px-8 !py-4 !text-base rounded-sm font-semibold uppercase tracking-wider transition-transform duration-150 hover:scale-[1.02] w-full sm:w-auto whitespace-normal"
+                style={{ background: "linear-gradient(160deg, #29e074, #1fb85c)", color: "#08110B", fontFamily: "Inter" }}
               >
-                Nous contacter pour ce produit
-              </SolidButton>
+                <WhatsAppGlyph size={20} color="#08110B" />
+                Commander via WhatsApp
+              </a>
               <GhostButton onClick={() => go("catalog")} className="w-full sm:w-auto whitespace-normal">Continuer à explorer</GhostButton>
             </div>
+            <a
+              href={whatsappLink(buildWhatsAppQuestionMessage())}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-block text-xs uppercase tracking-widest font-semibold"
+              style={{ color: COLORS.magenta, fontFamily: "Inter" }}
+            >
+              Une question ? Écrivez-nous sur WhatsApp
+            </a>
+
+            {/* Zone de réassurance, compacte, juste sous le CTA principal —
+                uniquement les engagements réellement tenus par King Outlet. */}
+            <ul
+              className="mt-5 grid grid-cols-1 xs:grid-cols-2 gap-x-4 gap-y-1.5 text-xs"
+              style={{ color: COLORS.inkDim, fontFamily: "Inter" }}
+            >
+              <li>✓ Livraison partout en France</li>
+              <li>✓ Suivi de commande</li>
+              <li>✓ Service client 7j/7</li>
+              <li>✓ Commande simple via WhatsApp</li>
+            </ul>
 
             {/* Détails, groupés en accordéon pour éviter le pavé de texte.
                 Chaque ligne empile le libellé au-dessus de la valeur sur mobile (la valeur peut
                 être longue et revenir à la ligne librement), et repasse en ligne côte-à-côte à
-                partir de "sm" — comme demandé, plus aucune valeur ne peut sortir de l'écran. */}
+                partir de "sm" — comme demandé, plus aucune valeur ne peut sortir de l'écran.
+                Regroupé en 3 blocs clairs pour éviter la répétition (le statut réel du produit
+                n'est affiché qu'une fois, tout en haut) et éviter que tout soit mélangé. */}
             <InfoAccordion
               defaultOpen="livraison"
               sections={[
                 {
                   id: "livraison",
-                  label: "Livraison & retours",
+                  label: "Informations de livraison",
                   content: (
-                    <div className="space-y-4">
-                      <DetailRow label="Produits en stock" value="Expédition sous 48-72h" />
-                      <DetailRow label="Produits sur commande" value="Délai de 2 semaines" />
-                      <DetailRow label="Remise en main propre" value="Rhône-Alpes, dès 1 000 € d'achat" />
-                      <DetailRow label="Service client" value="Disponible 7j/7 sur WhatsApp" />
+                    <div className="space-y-6">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: COLORS.magenta }}>Ce produit</div>
+                        {(() => {
+                          const info = getAvailabilityInfo(product.availability);
+                          return (
+                            <DetailRow
+                              label={`${info.emoji} ${info.statusLine}`}
+                              value={info.shortDelay}
+                            />
+                          );
+                        })()}
+                      </div>
+                      <div className="space-y-3 pt-5 border-t" style={{ borderColor: COLORS.line }}>
+                        <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: COLORS.magenta }}>Zone de livraison</div>
+                        <DetailRow label="🇫🇷 France" value="Livraison dans toute la France" />
+                        <DetailRow label="📍 Rhône-Alpes" value="Livraison possible pour les commandes d'un montant minimum de 1 000 €" />
+                      </div>
+                      <div className="space-y-3 pt-5 border-t" style={{ borderColor: COLORS.line }}>
+                        <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: COLORS.magenta }}>Service client</div>
+                        <DetailRow label="💬 WhatsApp" value="Disponible 7j/7" />
+                      </div>
                     </div>
                   ),
                 },
@@ -3282,8 +3393,8 @@ function ContactPage() {
           Livraison
         </div>
         <div className="space-y-3 text-sm leading-relaxed" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
-          <p>Nous expédions sous 48 à 72 heures après paiement pour les produits disponibles en stock. Pour les produits sur commande, le délai est de 2 semaines.</p>
-          <p>Nous livrons également en main propre dans toute la région Rhône-Alpes, pour toute commande à partir de 1 000 € minimum.</p>
+          <p>Nous expédions sous 48 à 72h après paiement pour les produits disponibles en stock. Pour les produits sur commande, la livraison est estimée sous 2 à 3 semaines.</p>
+          <p>Nous livrons également en main propre dans toute la région Rhône-Alpes, pour les commandes d'un montant minimum de 1 000 €.</p>
         </div>
       </div>
 
@@ -3501,7 +3612,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
       return;
     }
     if (!editing.availability) {
-      setSaveError("Veuillez choisir la disponibilité de ce produit (Disponible / Sur commande).");
+      setSaveError("Veuillez choisir la disponibilité de ce produit (Disponible / Sur commande / Indisponible).");
       return;
     }
     setSaveError("");
@@ -4049,9 +4160,10 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                       <div className="flex gap-1 flex-wrap">
                         {p.isNew && <Badge tone="new">Nouveau</Badge>}
                         {p.featured && <Badge tone="dark">En avant</Badge>}
-                        {p.availability === "disponible"
-                          ? <Badge tone="success">Disponible</Badge>
-                          : <Badge tone="warning">Sur commande</Badge>}
+                        {(() => {
+                          const info = getAvailabilityInfo(p.availability);
+                          return <Badge tone={info.badgeTone}>{info.emoji} {info.label}</Badge>;
+                        })()}
                       </div>
                     </td>
                     <td className="py-2 pr-4">
@@ -4357,8 +4469,9 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 onChange={(e) => setEditing({ ...editing, availability: e.target.value })}
               >
                 <option value="">— Choisir —</option>
-                <option value="disponible">Disponible</option>
-                <option value="sur_commande">Sur commande</option>
+                <option value="disponible">🟢 Disponible</option>
+                <option value="sur_commande">🟠 Sur commande</option>
+                <option value="indisponible">🔴 Indisponible</option>
               </select>
             </div>
           </div>
@@ -4862,6 +4975,9 @@ function Footer({ go, setCategoryFilter, setGenderFilter, setSubcategoryFilter }
             WhatsApp
           </a>
           <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Service client 7j/7</div>
+          <button onClick={() => go("contact")} className="block text-xs py-1 text-left" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+            Livraison
+          </button>
           <div className="text-[11px] uppercase tracking-widest mt-4 mb-2" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Paiement</div>
           <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Virement · PayPal · Crypto</div>
         </div>
@@ -4901,7 +5017,7 @@ function buildWhatsAppOrderMessage(cart) {
     lines.push("");
   });
   lines.push(
-    "Livraison partout en France : jusqu'à 2 semaines pour les articles sur commande. Produits en stock : livraison sous 72h. Remise en main propre possible à Grenoble et dans ses environs."
+    "Livraison partout en France. Produits en stock : expédition sous 48 à 72h. Produits sur commande : livraison estimée sous 2 à 3 semaines. Remise en main propre possible à Grenoble et dans ses environs."
   );
   lines.push("");
   lines.push("Je souhaite connaître la disponibilité et les modalités de livraison.");
@@ -5021,14 +5137,24 @@ function CartDrawer({ open, onClose, cart, updateQty, removeItem, go }) {
                       <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>{item.brandName}</div>
                     )}
                     <div className="text-[11px] mt-1 flex flex-wrap gap-x-2 gap-y-0.5" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+                      {item.reference && <span className="font-mono">Réf. {item.reference}</span>}
                       {item.size && <span>{item.sizeLabel || "Taille"} : {item.size}</span>}
                       {item.color && <span>Couleur : {item.color}</span>}
                     </div>
+                    {item.availability && (() => {
+                      const info = getAvailabilityInfo(item.availability);
+                      return (
+                        <div className="mt-1.5">
+                          <Badge tone={info.badgeTone}>{info.emoji} {info.label}</Badge>
+                          <div className="text-[11px] mt-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{info.shortDelay}</div>
+                        </div>
+                      );
+                    })()}
                     <div className="flex items-center justify-between mt-2">
                       <div className="flex items-center gap-2 border rounded-sm" style={{ borderColor: COLORS.line }}>
-                        <button onClick={() => updateQty(item.cartItemId, item.quantity - 1)} className="w-6 h-6 text-sm" style={{ color: COLORS.ink }}>−</button>
+                        <button onClick={() => updateQty(item.cartItemId, item.quantity - 1)} className="w-8 h-8 text-sm" style={{ color: COLORS.ink }} aria-label="Diminuer la quantité">−</button>
                         <span className="text-xs w-4 text-center" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{item.quantity}</span>
-                        <button onClick={() => updateQty(item.cartItemId, item.quantity + 1)} className="w-6 h-6 text-sm" style={{ color: COLORS.ink }}>+</button>
+                        <button onClick={() => updateQty(item.cartItemId, item.quantity + 1)} className="w-8 h-8 text-sm" style={{ color: COLORS.ink }} aria-label="Augmenter la quantité">+</button>
                       </div>
                       {item.price != null && (
                         <div className="text-xs font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{(item.price * item.quantity).toFixed(2)} €</div>
@@ -5045,7 +5171,7 @@ function CartDrawer({ open, onClose, cart, updateQty, removeItem, go }) {
           <div className="px-5 py-5 border-t" style={{ borderColor: COLORS.line }}>
             {hasPrices && (
               <div className="flex items-center justify-between mb-4">
-                <span className="text-xs uppercase tracking-widest" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Sous-total</span>
+                <span className="text-xs uppercase tracking-widest" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Total</span>
                 <span className="text-base font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{subtotal.toFixed(2)} €</span>
               </div>
             )}
@@ -5077,6 +5203,45 @@ function CartDrawer({ open, onClose, cart, updateQty, removeItem, go }) {
 
 const STORAGE_KEY = "king-outlet-catalog-data";
 
+
+/* ---------------- InfoStrip — réassurance courte sur l'accueil ----------------
+   Reprend strictement les informations déjà présentes ailleurs sur le site
+   (page Contact, fiche produit) : aucune nouvelle promesse commerciale. */
+function InfoStrip() {
+  const items = [
+    { icon: "🇫🇷", text: "Livraison partout en France" },
+    { icon: "⚡", text: "48–72h pour les produits en stock" },
+    { icon: "📦", text: "2–3 semaines pour les produits sur commande" },
+    { icon: "💬", text: "Commande et service client via WhatsApp" },
+  ];
+  return (
+    <section className="max-w-7xl mx-auto px-5 md:px-8 pt-4 pb-12 md:pt-8 md:pb-16">
+      <Reveal>
+        <div
+          className="rounded-sm border px-5 py-7 sm:px-10 sm:py-8"
+          style={{ borderColor: COLORS.line, background: COLORS.surface }}
+        >
+          <div className="text-center mb-6 sm:mb-7">
+            <div style={{ fontFamily: "Anton", fontSize: 18, color: COLORS.ink, letterSpacing: 0.5 }}>
+              KING <span className="neon-text">OUTLET</span>
+            </div>
+            <p className="text-xs mt-1.5" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+              Outlet premium des plus grandes marques, à prix réduits.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-6 text-center">
+            {items.map((it, i) => (
+              <div key={i} className="flex flex-col items-center gap-2 px-1">
+                <span className="text-lg" aria-hidden>{it.icon}</span>
+                <span className="text-[11px] sm:text-xs leading-relaxed" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{it.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Reveal>
+    </section>
+  );
+}
 
 /* ---------------- OrderInfo (Comment Passer Commande) ---------------- */
 function OrderInfo() {
@@ -5505,6 +5670,7 @@ function App() {
       {route === "home" && (
         <>
           <Hero go={go} />
+          <InfoStrip />
           <OrderInfo />
           <CategoryGrid go={go} setCategoryFilter={setCategoryFilter} setGenderFilter={setGenderFilter} setSubcategoryFilter={setSubcategoryFilter} />
           <section className="max-w-7xl mx-auto px-5 md:px-8 pb-16">
