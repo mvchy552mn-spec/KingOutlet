@@ -1228,8 +1228,23 @@ function Header({ route, go, cartCount, categories, brands, products, setCategor
     { route: "catalog", label: "Catalogue", dropdown: "categories" },
     { route: "catalog-new", label: "Nouveautés" },
     { route: "brands", label: "Marques", dropdown: "brands" },
+    { label: "Recherche photo", anchor: "recherche-photo" },
     { route: "contact", label: "Contact" },
   ];
+
+  /* Navigue vers l'accueil puis fait défiler jusqu'à la section "Recherche photo"
+     — utilisé par le nav desktop, le menu mobile et le footer. Le délai laisse
+     le temps à la page d'accueil de se rendre avant de calculer la position. */
+  const goToPhotoSearch = () => {
+    go("home");
+    setOpenMenu(null);
+    setOpen(false);
+    setMobileLevel(null);
+    setTimeout(() => {
+      const el = document.getElementById("recherche-photo");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+  };
 
   const openDropdown = (key) => {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
@@ -1377,7 +1392,7 @@ function Header({ route, go, cartCount, categories, brands, products, setCategor
               onMouseEnter={() => item.dropdown && openDropdown(item.dropdown)}
             >
               <button
-                onClick={() => { go(item.route); setOpenMenu(null); }}
+                onClick={() => { item.anchor ? goToPhotoSearch() : (go(item.route), setOpenMenu(null)); }}
                 className="text-xs uppercase tracking-widest font-medium flex items-center gap-1.5"
                 style={{
                   fontFamily: "Inter",
@@ -1669,6 +1684,13 @@ function Header({ route, go, cartCount, categories, brands, products, setCategor
                     {label}
                   </button>
                 ))}
+                <button
+                  onClick={goToPhotoSearch}
+                  className="text-left rounded-2xl border px-5 py-4"
+                  style={{ borderColor: COLORS.line, fontFamily: "Inter", fontSize: 14, textTransform: "uppercase", letterSpacing: 1, color: COLORS.ink }}
+                >
+                  Recherche photo
+                </button>
 
                 <button
                   onClick={() => { go("admin"); closeMobileMenu(); }}
@@ -4949,6 +4971,19 @@ function Footer({ go, setCategoryFilter, setGenderFilter, setSubcategoryFilter }
           {[["home","Accueil"],["catalog","Catalogue"],["catalog-new","Nouveautés"],["brands","Marques"],["contact","Contact"]].map(([r,l]) => (
             <button key={r} onClick={() => go(r)} className="block text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{l}</button>
           ))}
+          <button
+            onClick={() => {
+              go("home");
+              setTimeout(() => {
+                const el = document.getElementById("recherche-photo");
+                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+              }, 150);
+            }}
+            className="block text-xs py-1 text-left"
+            style={{ color: COLORS.inkDim, fontFamily: "Inter" }}
+          >
+            Recherche photo
+          </button>
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-widest mb-2.5 sm:mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Catégories</div>
@@ -5000,6 +5035,13 @@ function whatsappLink(message) {
 
 function buildWhatsAppQuestionMessage() {
   return "Bonjour KING OUTLET, j'aimerais avoir des informations concernant vos produits.";
+}
+
+/* Message générique pour la recherche par photo — le client joint la photo et
+   précise la taille directement dans la conversation WhatsApp une fois ouverte
+   (un lien wa.me ne peut pas joindre un fichier automatiquement). */
+function buildWhatsAppPhotoSearchMessage() {
+  return "Bonjour KING OUTLET, je recherche un article précis. Je vous envoie une photo ci-dessous.\n\nTaille souhaitée : ";
 }
 
 /* Construit le message de commande uniquement à partir des données réellement
@@ -5237,6 +5279,59 @@ function InfoStrip() {
               </div>
             ))}
           </div>
+        </div>
+      </Reveal>
+    </section>
+  );
+}
+
+/* ---------------- PhotoSearchSection — recherche d'un article par photo ----------------
+   Le client envoie une photo de l'article recherché + la taille souhaitée directement
+   sur WhatsApp. Un lien wa.me ne pouvant pas joindre de fichier, le message préparé
+   invite le client à joindre sa photo et indiquer sa taille une fois la conversation
+   ouverte — aucune information n'est inventée ni présupposée. */
+function PhotoSearchSection() {
+  return (
+    <section id="recherche-photo" className="max-w-7xl mx-auto px-5 md:px-8 pb-16 md:pb-20 scroll-mt-20">
+      <Reveal>
+        <div
+          className="rounded-sm border px-5 py-8 sm:px-10 sm:py-10 text-center"
+          style={{ borderColor: COLORS.line, background: COLORS.surface }}
+        >
+          <Eyebrow>Article introuvable ?</Eyebrow>
+          <h2 className="mt-3 mb-3" style={{ fontFamily: "Anton", fontSize: "clamp(22px,3.5vw,32px)", color: COLORS.ink }}>
+            ENVOYEZ-NOUS UNE PHOTO
+          </h2>
+          <p className="text-sm max-w-xl mx-auto mb-7 leading-relaxed" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+            Vous ne trouvez pas l'article que vous cherchez dans notre catalogue ? Envoyez-nous une photo du produit ainsi que la taille souhaitée sur WhatsApp — notre équipe vérifie sa disponibilité et vous répond directement.
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto text-left mb-7">
+            {[
+              "Envoyez une photo de l'article recherché",
+              "Indiquez la taille souhaitée",
+              "Notre équipe vous confirme la disponibilité",
+            ].map((step, i) => (
+              <div key={i} className="flex items-start gap-3 flex-1">
+                <span
+                  className="shrink-0 flex items-center justify-center rounded-full text-xs font-bold"
+                  style={{ width: 22, height: 22, background: `linear-gradient(135deg, ${COLORS.purple}, ${COLORS.magenta})`, color: "#0F0806" }}
+                >
+                  {i + 1}
+                </span>
+                <span className="text-xs leading-snug" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{step}</span>
+              </div>
+            ))}
+          </div>
+          <a
+            href={whatsappLink(buildWhatsAppPhotoSearchMessage())}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-2.5 px-8 py-4 rounded-sm text-sm font-semibold uppercase tracking-wider transition-transform duration-150 hover:scale-[1.02]"
+            style={{ background: "linear-gradient(160deg, #29e074, #1fb85c)", color: "#08110B", fontFamily: "Inter" }}
+          >
+            <WhatsAppGlyph size={20} color="#08110B" />
+            Envoyer ma photo sur WhatsApp
+          </a>
         </div>
       </Reveal>
     </section>
@@ -5705,6 +5800,7 @@ function App() {
               ))}
             </RevealGroup>
           </section>
+          <PhotoSearchSection />
           <ReviewsSection reviews={reviews} videoTestimonials={videoTestimonials} />
           <FAQSection items={FAQ_ITEMS} showCta />
         </>
