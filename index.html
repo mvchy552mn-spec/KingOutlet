@@ -80,10 +80,9 @@ const CATEGORIES = [
    ------------------------------------------------------------
    Navigation : Catalogue → Catégorie → Homme/Femme → Sous-catégorie → Produits
 
-   Une catégorie absente de cet objet (ex : "accessoires", "montres")
-   conserve son comportement d'origine (pas de niveau Genre/Sous-catégorie,
-   navigation directe vers les marques) — voir consigne "NE PAS MODIFIER
-   CETTE CATÉGORIE" pour Accessoires.
+   Une catégorie absente de cet objet (ex : "montres") conserve son
+   comportement d'origine (pas de niveau Genre/Sous-catégorie, navigation
+   directe vers les marques).
 
    Pour ajouter une nouvelle catégorie ou sous-catégorie plus tard, il
    suffit d'éditer cet objet : tout le reste (menu desktop, menu mobile,
@@ -108,6 +107,10 @@ const CATALOG_TREE = {
   },
   casquettes: {
     unisexe: ["Casquettes", "Chapeaux", "Bonnets"],
+  },
+  accessoires: {
+    homme: ["Lunettes", "Portefeuilles", "Ceintures", "Bijoux", "Bracelets", "Porte-cartes", "Écharpes", "Gants", "Autres accessoires"],
+    femme: ["Lunettes", "Portefeuilles", "Ceintures", "Bijoux", "Bracelets", "Porte-cartes", "Écharpes", "Gants", "Autres accessoires"],
   },
 };
 
@@ -1173,7 +1176,7 @@ function Header({ route, go, cartCount, categories, brands, products, setCategor
   const [hoveredCategory, setHoveredCategory] = useState(null); // desktop mega-menu : catégorie survolée
   const [hoveredGender, setHoveredGender] = useState(null); // desktop mega-menu : Homme/Femme survolé
   // mobileLevel : null = niveau 1 (racine)
-  //   { id, name, step: "brands" }             -> catégorie sans sous-catégories (ex : Accessoires, Montres) : liste de marques (comportement d'origine)
+  //   { id, name, step: "brands" }             -> catégorie sans sous-catégories (ex : Montres) : liste de marques (comportement d'origine)
   //   { id, name, step: "gender" }              -> catégorie avec Homme/Femme : choix du genre
   //   { id, name, step: "subcats", gender }     -> liste des sous-catégories (gender = null si catégorie unisexe, ex : Casquettes)
   const [mobileLevel, setMobileLevel] = useState(null);
@@ -1478,7 +1481,7 @@ function Header({ route, go, cartCount, categories, brands, products, setCategor
                     );
                   }
 
-                  /* Catégorie sans sous-catégories (Accessoires, Montres) : comportement d'origine,
+                  /* Catégorie sans sous-catégories (ex : Montres) : comportement d'origine,
                      inchangé — liste des marques disponibles. */
                   const catBrands = brandsInCategory(activeCat.id);
                   return (
@@ -1706,7 +1709,7 @@ function Header({ route, go, cartCount, categories, brands, products, setCategor
                 </button>
               </div>
             ) : (
-              /* Catégorie sans sous-catégories (Accessoires, Montres) : comportement d'origine, inchangé */
+              /* Catégorie sans sous-catégories (ex : Montres) : comportement d'origine, inchangé */
               <div key={"menu-cat-" + mobileLevel.id} className="mobile-menu-panel px-5 py-6">
                 <h2 className="mb-1" style={{ fontFamily: "Anton", fontSize: 28, letterSpacing: 0.5, color: COLORS.ink }}>{mobileLevel.name.toUpperCase()}</h2>
                 <p className="mb-6 text-xs uppercase tracking-widest" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Choisissez une marque</p>
@@ -2099,10 +2102,6 @@ function ProductCard({ product, brand, onOpen }) {
           style={{ boxShadow: `inset 0 0 0 1px ${COLORS.magenta}88` }}
         />
         <TagCorner />
-        <div className="absolute top-3 left-3 flex gap-2">
-          {product.isNew && <Badge tone="new">Nouveau</Badge>}
-          {product.featured && <Badge tone="dark">En avant</Badge>}
-        </div>
         <div className="absolute top-3 right-3">
           {product.availability === "disponible"
             ? <Badge tone="success">Disponible</Badge>
@@ -2161,7 +2160,7 @@ function Catalog({ products, brands, initialCategory, initialBrand, initialGende
   const allColors = useMemo(() => Array.from(new Set(products.flatMap((p) => p.colors))), [products]);
 
   // Genre / sous-catégories disponibles pour la catégorie actuellement sélectionnée
-  // (vide si la catégorie n'a pas de niveau Genre/Sous-catégorie, ex : Accessoires, Montres)
+  // (vide si la catégorie n'a pas de niveau Genre/Sous-catégorie, ex : Montres)
   const gendersAvailable = category !== "all" ? gendersForCategory(category) : [];
   const subcatsAvailable =
     category !== "all"
@@ -2404,10 +2403,6 @@ function ProductGallery({ product }) {
           />
         </div>
         <TagCorner />
-        <div className="absolute top-3 left-3 flex gap-2">
-          {product.isNew && <Badge tone="new">Nouveau</Badge>}
-          {product.featured && <Badge tone="dark">En avant</Badge>}
-        </div>
         {product.images.length > 1 && (
           <div
             className="absolute bottom-3 right-3 px-2.5 py-1 rounded-sm text-[10px] font-mono"
