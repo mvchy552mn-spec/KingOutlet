@@ -2709,30 +2709,17 @@ function ProductPage({ product, brand, products, brands, onOpen, go, onAddToCart
                 être longue et revenir à la ligne librement), et repasse en ligne côte-à-côte à
                 partir de "sm" — comme demandé, plus aucune valeur ne peut sortir de l'écran. */}
             <InfoAccordion
-              defaultOpen="details"
+              defaultOpen="livraison"
               sections={[
-                {
-                  id: "details",
-                  label: "Détails du produit",
-                  content: (
-                    <div className="space-y-3">
-                      <DetailRow label="Catégorie" value={categoryLabel} />
-                      <DetailRow label="Genre" value={genderLabel} />
-                      <DetailRow label="Sous-catégorie" value={product.subcategory} />
-                      <DetailRow label="Marque" value={brand?.name} />
-                      <DetailRow label="Référence" value={product.reference} mono />
-                      <DetailRow label="Authenticité" value="Garantie" />
-                    </div>
-                  ),
-                },
                 {
                   id: "livraison",
                   label: "Livraison & retours",
                   content: (
-                    <div className="space-y-3">
-                      <DetailRow label="Livraison" value="48-72h en stock, 2 sem. sur commande" />
-                      <DetailRow label="Main propre" value="Rhône-Alpes dès 1 000 €" />
-                      <DetailRow label="Service client" value="7j/7" />
+                    <div className="space-y-4">
+                      <DetailRow label="Produits en stock" value="Expédition sous 48-72h" />
+                      <DetailRow label="Produits sur commande" value="Délai de 2 semaines" />
+                      <DetailRow label="Remise en main propre" value="Rhône-Alpes, dès 1 000 € d'achat" />
+                      <DetailRow label="Service client" value="Disponible 7j/7 sur WhatsApp" />
                     </div>
                   ),
                 },
@@ -4815,14 +4802,14 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 function Footer({ go, setCategoryFilter, setGenderFilter, setSubcategoryFilter }) {
   return (
     <footer className="border-t mt-10" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
-      <div className="max-w-7xl mx-auto px-5 md:px-8 py-8 sm:py-10 md:py-12 grid grid-cols-2 md:grid-cols-3 gap-x-5 gap-y-7 sm:gap-8">
+      <div className="max-w-7xl mx-auto px-5 md:px-8 py-8 sm:py-10 md:py-12 grid grid-cols-2 md:grid-cols-4 gap-x-5 gap-y-7 sm:gap-8">
         <div className="col-span-2 md:col-span-1">
           <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>KING <span className="neon-text">OUTLET</span></div>
-          <p className="text-xs mt-3 max-w-xs" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Plateforme catalogue streetwear premium — sélection multi-marques, service dédié.</p>
+          <p className="text-xs mt-3 max-w-xs" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>L'outlet premium des plus grandes marques, à prix réduits.</p>
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-widest mb-2.5 sm:mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Navigation</div>
-          {[["home","Accueil"],["catalog","Catalogue"],["catalog-new","Nouveautés"],["contact","Contact"]].map(([r,l]) => (
+          {[["home","Accueil"],["catalog","Catalogue"],["catalog-new","Nouveautés"],["brands","Marques"],["contact","Contact"]].map(([r,l]) => (
             <button key={r} onClick={() => go(r)} className="block text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{l}</button>
           ))}
         </div>
@@ -4838,6 +4825,21 @@ function Footer({ go, setCategoryFilter, setGenderFilter, setSubcategoryFilter }
               {c.name}
             </button>
           ))}
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-widest mb-2.5 sm:mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Contact</div>
+          <a
+            href={whatsappLink(buildWhatsAppQuestionMessage())}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-xs py-1"
+            style={{ color: COLORS.inkDim, fontFamily: "Inter" }}
+          >
+            WhatsApp
+          </a>
+          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Service client 7j/7</div>
+          <div className="text-[11px] uppercase tracking-widest mt-4 mb-2" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Paiement</div>
+          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Virement · PayPal · Crypto</div>
         </div>
       </div>
       <div className="border-t py-4 sm:py-5 text-center text-[11px]" style={{ borderColor: COLORS.line, color: COLORS.inkDim, fontFamily: "Inter" }}>
@@ -5055,7 +5057,7 @@ const STORAGE_KEY = "king-outlet-catalog-data";
 /* ---------------- OrderInfo (Comment Passer Commande) ---------------- */
 function OrderInfo() {
   return (
-    <section className="max-w-7xl mx-auto px-5 md:px-8 pb-6 md:pb-8">
+    <section className="max-w-7xl mx-auto px-5 md:px-8 py-6 md:py-8">
       <Reveal>
         <div className="flex justify-center">
           <img
