@@ -1016,6 +1016,140 @@ function SolidButton({ children, onClick, className = "" }) {
   );
 }
 
+/* ---------------- FAQ — questions fréquentes (fiches produits + page d'accueil) ----------------
+   Composant réutilisable (FAQSection / FAQItem) pour garder un design identique partout. */
+
+const FAQ_ITEMS = [
+  {
+    q: "Comment passer commande ?",
+    a: "Pour commander, envoyez-nous sur WhatsApp une capture ou une photo du produit qui vous intéresse ainsi que les informations souhaitées. Notre équipe vous accompagnera directement.",
+  },
+  {
+    q: "Comment obtenir plus d'informations sur un article ?",
+    a: "Contactez-nous directement sur WhatsApp en indiquant le nom ou la référence du produit.",
+  },
+  {
+    q: "Comment fonctionne le paiement ?",
+    a: "Les modalités de paiement vous sont communiquées directement par notre service client sur WhatsApp lors de la validation de la commande. Les moyens de paiement acceptés sont le virement bancaire, PayPal et les crypto-monnaies.",
+  },
+  {
+    q: "Comment recevoir le suivi de ma commande ?",
+    a: "Après validation de la commande, les informations de suivi vous seront communiquées dans les jours suivants selon l'avancement de votre commande.",
+  },
+  {
+    q: "Comment contacter King Outlet ?",
+    a: "Le service client et les prises de commande sont exclusivement disponibles sur WhatsApp.",
+  },
+  {
+    q: "Puis-je commander plusieurs articles ?",
+    a: "Oui. Vous pouvez envoyer plusieurs produits ou captures d'écran dans votre demande WhatsApp.",
+  },
+  {
+    q: "Quels sont les délais de livraison ?",
+    a: "Pour les produits en stock, l'expédition est effectuée sous 48 à 72 heures après paiement. Pour les produits sur commande, le délai est de 2 semaines.",
+  },
+  {
+    q: "Livrez-vous partout en France ?",
+    a: "Oui, nous livrons dans toute la France.",
+  },
+  {
+    q: "Livrez-vous dans la région Rhône-Alpes ?",
+    a: "Oui, nous livrons en main propre dans toute la région Rhône-Alpes pour les commandes d'un montant minimum de 1 000 €.",
+  },
+  {
+    q: "Comment savoir si un produit est en stock ?",
+    a: "Contactez-nous directement sur WhatsApp avec le produit qui vous intéresse. Notre équipe vous indiquera sa disponibilité ainsi que le délai de livraison correspondant.",
+  },
+];
+
+function FAQItem({ item, open, onToggle }) {
+  return (
+    <div className="border-b last:border-0" style={{ borderColor: COLORS.line }}>
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-4 py-5 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-sm sm:text-base font-semibold" style={{ color: COLORS.ink, fontFamily: "Inter" }}>
+          {item.q}
+        </span>
+        <span
+          aria-hidden
+          className="shrink-0 flex items-center justify-center rounded-full transition-transform duration-300"
+          style={{
+            width: 26,
+            height: 26,
+            border: `1px solid ${COLORS.purpleDim}`,
+            color: COLORS.magenta,
+            fontFamily: "Inter",
+            transform: open ? "rotate(45deg)" : "rotate(0deg)",
+          }}
+        >
+          +
+        </span>
+      </button>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateRows: open ? "1fr" : "0fr",
+          transition: "grid-template-rows 300ms cubic-bezier(0.16,1,0.3,1)",
+        }}
+      >
+        <div className="overflow-hidden">
+          <p className="text-sm leading-relaxed pb-5 pr-8" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+            {item.a}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FAQSection({ items = FAQ_ITEMS, showCta = false }) {
+  const [openIndex, setOpenIndex] = useState(0);
+
+  return (
+    <section className="max-w-4xl mx-auto px-5 md:px-8 py-14 sm:py-20">
+      <Reveal>
+        <Eyebrow>FAQ</Eyebrow>
+        <h2 className="mt-3 mb-8 sm:mb-10" style={{ fontFamily: "Anton", fontSize: "clamp(24px,4vw,36px)", color: COLORS.ink }}>
+          QUESTIONS FRÉQUENTES
+        </h2>
+      </Reveal>
+      <Reveal delay={80}>
+        <div className="rounded-sm border px-5 sm:px-8" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+          {items.map((item, i) => (
+            <FAQItem key={i} item={item} open={openIndex === i} onToggle={() => setOpenIndex((cur) => (cur === i ? -1 : i))} />
+          ))}
+        </div>
+      </Reveal>
+      {showCta && (
+        <Reveal delay={140}>
+          <div className="mt-10 text-center">
+            <p className="text-sm mb-4" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+              Une autre question ? Contactez-nous directement sur WhatsApp.
+            </p>
+            <a
+              href={whatsappLink(buildWhatsAppQuestionMessage())}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block px-7 py-3.5 rounded-sm text-sm font-semibold uppercase tracking-wider transition-transform duration-150 hover:scale-[1.02]"
+              style={{
+                background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`,
+                color: "#0F0806",
+                fontFamily: "Inter",
+                boxShadow: `0 0 16px rgba(245,197,66,0.5)`,
+              }}
+            >
+              CONTACTER KING OUTLET
+            </a>
+          </div>
+        </Reveal>
+      )}
+    </section>
+  );
+}
+
 /* ---------------- Header ---------------- */
 
 function Header({ route, go, cartCount, categories, brands, products, setCategoryFilter, setBrandFilter, setSelectedBrandId, setGenderFilter, setSubcategoryFilter, onOpenCart }) {
@@ -2596,8 +2730,8 @@ function ProductPage({ product, brand, products, brands, onOpen, go, onAddToCart
                   label: "Livraison & retours",
                   content: (
                     <div className="space-y-3">
-                      <DetailRow label="Livraison" value="Partout en France" />
-                      <DetailRow label="Main propre" value="Paris & IDF" />
+                      <DetailRow label="Livraison" value="48-72h en stock, 2 sem. sur commande" />
+                      <DetailRow label="Main propre" value="Rhône-Alpes dès 1 000 €" />
                       <DetailRow label="Service client" value="7j/7" />
                     </div>
                   ),
@@ -2621,6 +2755,8 @@ function ProductPage({ product, brand, products, brands, onOpen, go, onAddToCart
           </RevealGroup>
         </div>
       )}
+
+      <FAQSection items={FAQ_ITEMS} />
     </section>
   );
 }
@@ -3104,54 +3240,74 @@ function AboutPage({ go }) {
 /* ---------------- Contact ---------------- */
 
 function ContactPage() {
-  const [sent, setSent] = useState(false);
-  const [form, setForm] = useState({ nom: "", prenom: "", email: "", tel: "", sujet: "", message: "" });
-
-  const submit = (e) => {
-    e.preventDefault();
-    setSent(true);
-  };
-
   return (
-    <section className="max-w-5xl mx-auto px-5 md:px-8 py-16 grid md:grid-cols-[1.2fr_1fr] gap-12">
-      <div>
-        <Eyebrow>Contact</Eyebrow>
-        <h1 className="mt-3 mb-6" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>PARLONS-EN</h1>
+    <section className="max-w-4xl mx-auto px-5 md:px-8 py-16">
+      <Eyebrow>Contact</Eyebrow>
+      <h1 className="mt-3 mb-4" style={{ fontFamily: "Anton", fontSize: "clamp(28px,5vw,44px)", color: COLORS.ink }}>
+        CONTACTEZ KING OUTLET
+      </h1>
+      <p className="text-sm max-w-2xl mb-10 leading-relaxed" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+        Pour toute demande, question ou commande, notre service client est disponible uniquement sur WhatsApp.
+      </p>
 
-        {sent ? (
-          <div className="p-6 rounded-sm border neon-border" style={{ background: COLORS.surface }}>
-            <div className="neon-text" style={{ fontFamily: "Anton", fontSize: 20 }}>MESSAGE ENVOYÉ</div>
-            <p className="text-sm mt-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Nous revenons vers vous rapidement.</p>
-          </div>
-        ) : (
-          <form onSubmit={submit} className="grid sm:grid-cols-2 gap-4">
-            <input required placeholder="Nom" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.nom} onChange={(e) => setForm({ ...form, nom: e.target.value })} />
-            <input required placeholder="Prénom" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.prenom} onChange={(e) => setForm({ ...form, prenom: e.target.value })} />
-            <input required type="email" placeholder="Email" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            <input placeholder="Téléphone" className="px-4 py-3 text-sm rounded-sm sm:col-span-1" style={selectStyle} value={form.tel} onChange={(e) => setForm({ ...form, tel: e.target.value })} />
-            <input required placeholder="Sujet" className="px-4 py-3 text-sm rounded-sm sm:col-span-2" style={selectStyle} value={form.sujet} onChange={(e) => setForm({ ...form, sujet: e.target.value })} />
-            <textarea required placeholder="Message" rows={5} className="px-4 py-3 text-sm rounded-sm sm:col-span-2" style={selectStyle} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
-            <div className="sm:col-span-2">
-              <SolidButton className="w-full sm:w-auto">Envoyer</SolidButton>
-            </div>
-          </form>
-        )}
+      <div className="p-6 sm:p-8 rounded-sm border mb-8" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+        <div className="text-xs uppercase tracking-widest mb-5" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>
+          Comment nous contacter ?
+        </div>
+        <ol className="space-y-4">
+          {[
+            "Parcourez notre catalogue et choisissez le ou les articles qui vous intéressent.",
+            "Envoyez-nous sur WhatsApp la photo du produit ou les captures d'écran des articles souhaités, les références ou noms des articles si disponibles, et la quantité souhaitée.",
+            "Notre équipe vous répondra directement sur WhatsApp pour vous communiquer les informations nécessaires et vous accompagner pour votre commande.",
+            "Une fois la commande validée et le paiement confirmé, vous recevrez les informations concernant votre commande et votre suivi.",
+          ].map((step, i) => (
+            <li key={i} className="flex gap-4 text-sm" style={{ color: COLORS.ink, fontFamily: "Inter" }}>
+              <span
+                className="shrink-0 flex items-center justify-center rounded-full text-xs font-bold"
+                style={{ width: 24, height: 24, background: `linear-gradient(135deg, ${COLORS.purple}, ${COLORS.magenta})`, color: "#0F0806" }}
+              >
+                {i + 1}
+              </span>
+              <span className="leading-relaxed pt-0.5">{step}</span>
+            </li>
+          ))}
+        </ol>
       </div>
 
-      <div className="space-y-6">
-        <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
-          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Réseaux</div>
-          {["Instagram", "TikTok", "Snapchat", "WhatsApp"].map((s) => (
-            <div key={s} className="flex items-center justify-between py-2 border-b last:border-0 text-sm" style={{ borderColor: COLORS.line, fontFamily: "Inter", color: COLORS.ink }}>
-              {s}
-              <span className="text-xs" style={{ color: COLORS.inkDim }}>lien à renseigner</span>
-            </div>
-          ))}
+      <div className="p-6 rounded-sm border neon-border mb-8" style={{ borderColor: COLORS.line, background: COLORS.surface2 }}>
+        <div className="text-xs uppercase tracking-widest mb-2" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>
+          Important
         </div>
-        <div className="p-6 rounded-sm border" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
-          <div className="text-xs uppercase tracking-widest mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Service</div>
-          <p className="text-sm" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Livraison partout en France. Remise en main propre disponible sur Paris et Île-de-France. Support 7j/7.</p>
+        <p className="text-sm leading-relaxed" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+          Les commandes et le service client sont exclusivement gérés sur WhatsApp.
+        </p>
+      </div>
+
+      <div className="p-6 rounded-sm border mb-10" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
+        <div className="text-xs uppercase tracking-widest mb-4" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>
+          Livraison
         </div>
+        <div className="space-y-3 text-sm leading-relaxed" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>
+          <p>Nous expédions sous 48 à 72 heures après paiement pour les produits disponibles en stock. Pour les produits sur commande, le délai est de 2 semaines.</p>
+          <p>Nous livrons également en main propre dans toute la région Rhône-Alpes, pour toute commande à partir de 1 000 € minimum.</p>
+        </div>
+      </div>
+
+      <div className="text-center">
+        <a
+          href={whatsappLink(buildWhatsAppQuestionMessage())}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block w-full sm:w-auto px-8 py-4 rounded-sm text-base font-semibold uppercase tracking-wider transition-transform duration-150 hover:scale-[1.02]"
+          style={{
+            background: `linear-gradient(90deg, ${COLORS.purple}, ${COLORS.magenta})`,
+            color: "#0F0806",
+            fontFamily: "Inter",
+            boxShadow: `0 0 18px rgba(245,197,66,0.55)`,
+          }}
+        >
+          Nous contacter sur WhatsApp
+        </a>
       </div>
     </section>
   );
@@ -4659,7 +4815,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 function Footer({ go, setCategoryFilter, setGenderFilter, setSubcategoryFilter }) {
   return (
     <footer className="border-t mt-10" style={{ borderColor: COLORS.line, background: COLORS.surface }}>
-      <div className="max-w-7xl mx-auto px-5 md:px-8 py-8 sm:py-10 md:py-12 grid grid-cols-2 md:grid-cols-4 gap-x-5 gap-y-7 sm:gap-8">
+      <div className="max-w-7xl mx-auto px-5 md:px-8 py-8 sm:py-10 md:py-12 grid grid-cols-2 md:grid-cols-3 gap-x-5 gap-y-7 sm:gap-8">
         <div className="col-span-2 md:col-span-1">
           <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>KING <span className="neon-text">OUTLET</span></div>
           <p className="text-xs mt-3 max-w-xs" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Plateforme catalogue streetwear premium — sélection multi-marques, service dédié.</p>
@@ -4682,12 +4838,6 @@ function Footer({ go, setCategoryFilter, setGenderFilter, setSubcategoryFilter }
               {c.name}
             </button>
           ))}
-        </div>
-        <div className="col-span-2 md:col-span-1">
-          <div className="text-[11px] uppercase tracking-widest mb-2.5 sm:mb-3" style={{ color: COLORS.magenta, fontFamily: "Inter" }}>Service</div>
-          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Livraison France entière</div>
-          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Remise en main propre — Paris/IDF</div>
-          <div className="text-xs py-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Support 7j/7</div>
         </div>
       </div>
       <div className="border-t py-4 sm:py-5 text-center text-[11px]" style={{ borderColor: COLORS.line, color: COLORS.inkDim, fontFamily: "Inter" }}>
@@ -5364,6 +5514,7 @@ function App() {
             </RevealGroup>
           </section>
           <ReviewsSection reviews={reviews} videoTestimonials={videoTestimonials} />
+          <FAQSection items={FAQ_ITEMS} showCta />
         </>
       )}
 
