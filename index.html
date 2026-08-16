@@ -2777,16 +2777,17 @@ function ReviewCard({ review }) {
       </div>
 
       {review.productPhotoUrl && (
-        <div className="relative rounded-md overflow-hidden shrink-0" style={{ border: `1px solid ${COLORS.line}` }}>
+        <div className="relative rounded-md overflow-hidden shrink-0" style={{ border: `1px solid ${COLORS.line}`, aspectRatio: "4 / 5" }}>
           <img
             src={review.productPhotoUrl}
             alt="Article commandé"
-            className="w-full h-36 object-cover"
+            className="w-full h-full object-cover"
+            style={{ objectPosition: "center" }}
             onError={handleImgError}
             loading="lazy"
           />
           <span
-            className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded-full text-[9px] uppercase tracking-widest"
+            className="absolute bottom-2 left-2 px-2 py-1 rounded-full text-[9px] uppercase tracking-widest"
             style={{ background: "rgba(8,6,13,0.75)", color: COLORS.ink, fontFamily: "Inter", backdropFilter: "blur(4px)" }}
           >
             Article commandé
@@ -2803,14 +2804,14 @@ function ReviewCard({ review }) {
           <img
             src={review.photoUrl}
             alt={review.firstName}
-            className="w-10 h-10 rounded-full object-cover"
-            style={{ boxShadow: `0 0 0 1px ${COLORS.line}` }}
+            className="w-14 h-14 rounded-full object-cover shrink-0"
+            style={{ boxShadow: `0 0 0 1px ${COLORS.line}`, objectPosition: "center" }}
             onError={handleImgError}
             loading="lazy"
           />
         ) : (
           <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold"
+            className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-semibold shrink-0"
             style={{
               background: `linear-gradient(135deg, ${COLORS.purple}, ${COLORS.magenta})`,
               color: "#08060D",
@@ -4420,12 +4421,12 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
             onChange={onReviewPhotoInputChange}
           />
           {editingReview.productPhotoUrl ? (
-            <div className="relative mb-4">
+            <div className="relative mb-4" style={{ maxWidth: 220 }}>
               <img
                 src={editingReview.productPhotoUrl}
                 alt="Aperçu article commandé"
-                className="w-full h-32 object-cover rounded-sm"
-                style={{ border: `1px solid ${COLORS.line}` }}
+                className="w-full object-cover rounded-sm"
+                style={{ border: `1px solid ${COLORS.line}`, aspectRatio: "4 / 5", objectPosition: "center" }}
                 onError={handleImgError}
               />
               <button
