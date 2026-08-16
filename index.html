@@ -716,7 +716,9 @@ async function loadBrandsFromSupabase() {
    depuis Supabase. La table s'appelle "reviews" côté Supabase.
 
    Colonnes : id (uuid), first_name (text), rating (smallint 1-5),
-   comment (text), photo_url (text, nullable), video_url (text,
+   comment (text), photo_url (text, nullable) — photo de profil du
+   client —, product_photo_url (text, nullable) — photo de l'article
+   commandé, affichée dans la carte d'avis —, video_url (text,
    nullable), is_visible (boolean), created_at (timestamptz).
 
    Note : la lecture publique (RLS) ne renvoie que les lignes avec
@@ -734,6 +736,7 @@ function rowToReview(row) {
     rating: row.rating,
     comment: row.comment,
     photoUrl: row.photo_url || "",
+    productPhotoUrl: row.product_photo_url || "",
     videoUrl: row.video_url || "",
     date: row.created_at ? String(row.created_at).slice(0, 10) : "",
     visible: row.is_visible !== false,
@@ -747,6 +750,7 @@ function reviewToRow(r) {
     rating: r.rating,
     comment: r.comment,
     photo_url: r.photoUrl || null,
+    product_photo_url: r.productPhotoUrl || null,
     video_url: r.videoUrl || null,
     is_visible: r.visible !== false,
   };
@@ -2772,6 +2776,24 @@ function ReviewCard({ review }) {
         )}
       </div>
 
+      {review.productPhotoUrl && (
+        <div className="relative rounded-md overflow-hidden shrink-0" style={{ border: `1px solid ${COLORS.line}` }}>
+          <img
+            src={review.productPhotoUrl}
+            alt="Article commandé"
+            className="w-full h-36 object-cover"
+            onError={handleImgError}
+            loading="lazy"
+          />
+          <span
+            className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded-full text-[9px] uppercase tracking-widest"
+            style={{ background: "rgba(8,6,13,0.75)", color: COLORS.ink, fontFamily: "Inter", backdropFilter: "blur(4px)" }}
+          >
+            Article commandé
+          </span>
+        </div>
+      )}
+
       <p className="relative text-sm leading-relaxed" style={{ color: COLORS.ink, fontFamily: "Inter" }}>
         « {review.comment} »
       </p>
@@ -3247,6 +3269,46 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
   const [videoUploadStatus, setVideoUploadStatus] = useState("");
   const [videoDebugLog, setVideoDebugLog] = useState([]);
   const [isDraggingOverVideoDrop, setIsDraggingOverVideoDrop] = useState(false);
+
+  // ----- Upload de la photo "article commandé" d'un avis client (bucket "product-images") -----
+  const reviewPhotoInputRef = useRef(null);
+  const [reviewPhotoUploadStatus, setReviewPhotoUploadStatus] = useState("");
+  const [reviewPhotoUploadError, setReviewPhotoUploadError] = useState("");
+
+  const openReviewPhotoPicker = () => reviewPhotoInputRef.current?.click();
+
+  const handleReviewProductPhotoSelected = async (fileList) => {
+    const file = (fileList || [])[0];
+    if (!file) return;
+    setReviewPhotoUploadStatus("uploading");
+    setReviewPhotoUploadError("");
+    try {
+      const { accessToken } = await requireAdmin();
+      const uploaded = await uploadToSupabase(file, accessToken);
+      setEditingReview((r) => ({ ...r, productPhotoUrl: uploaded.publicUrl }));
+      setReviewPhotoUploadStatus("done");
+    } catch (err) {
+      setReviewPhotoUploadError(err && err.message ? err.message : String(err));
+      setReviewPhotoUploadStatus("done");
+    }
+  };
+
+  const onReviewPhotoInputChange = (e) => {
+    handleReviewProductPhotoSelected(e.target.files);
+    e.target.value = "";
+  };
+
+  const removeReviewProductPhoto = async () => {
+    const url = editingReview && editingReview.productPhotoUrl;
+    setEditingReview((r) => ({ ...r, productPhotoUrl: "" }));
+    if (!url) return;
+    try {
+      const { accessToken } = await requireAdmin();
+      await deleteFromSupabase(url, accessToken);
+    } catch (err) {
+      console.error("Suppression refusée :", err && err.message ? err.message : err);
+    }
+  };
 
   const tabs = [
     ["products", "Produits"],
@@ -4234,7 +4296,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
 
           <div className="flex items-center justify-between mb-3 mt-6">
             <div style={{ fontFamily: "Anton", fontSize: 20, color: COLORS.ink }}>AVIS CLIENTS</div>
-            <SolidButton onClick={() => setEditingReview({ id: null, firstName: "", rating: 5, comment: "", date: "", photoUrl: "", videoUrl: "", visible: true })}>+ Ajouter un avis</SolidButton>
+            <SolidButton onClick={() => { setReviewPhotoUploadStatus(""); setReviewPhotoUploadError(""); setEditingReview({ id: null, firstName: "", rating: 5, comment: "", date: "", photoUrl: "", productPhotoUrl: "", videoUrl: "", visible: true }); }}>+ Ajouter un avis</SolidButton>
           </div>
           {reviewsError && (
             <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
@@ -4254,7 +4316,7 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
                 <div className="text-sm font-semibold mt-2" style={{ color: COLORS.ink, fontFamily: "Inter" }}>{r.firstName}</div>
                 <p className="text-xs mt-1 line-clamp-2" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>{r.comment}</p>
                 <div className="flex gap-3 mt-3 items-center">
-                  <button onClick={() => setEditingReview(r)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta }}>Modifier</button>
+                  <button onClick={() => { setReviewPhotoUploadStatus(""); setReviewPhotoUploadError(""); setEditingReview(r); }} className="text-xs uppercase tracking-widest" style={{ color: COLORS.magenta }}>Modifier</button>
                   <button onClick={() => toggleReviewVisibility(r)} className="text-xs uppercase tracking-widest" style={{ color: COLORS.inkDim }}>
                     {r.visible ? "Masquer" : "Afficher"}
                   </button>
@@ -4346,8 +4408,47 @@ function AdminDashboard({ products, setProducts, brands, setBrands, categories, 
           <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Date (facultatif)</label>
           <input type="date" className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingReview.date} onChange={(e) => setEditingReview({ ...editingReview, date: e.target.value })} />
 
-          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>URL photo (facultatif)</label>
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>URL photo de profil du client (facultatif)</label>
           <input className="w-full px-3 py-2 text-sm rounded-sm mb-4" style={selectStyle} value={editingReview.photoUrl} onChange={(e) => setEditingReview({ ...editingReview, photoUrl: e.target.value })} placeholder="https://…" />
+
+          <label className="text-[11px] uppercase tracking-widest block mb-1" style={{ color: COLORS.inkDim, fontFamily: "Inter" }}>Photo de l'article commandé (facultatif)</label>
+          <input
+            ref={reviewPhotoInputRef}
+            type="file"
+            accept={FILE_INPUT_ACCEPT}
+            className="hidden"
+            onChange={onReviewPhotoInputChange}
+          />
+          {editingReview.productPhotoUrl ? (
+            <div className="relative mb-4">
+              <img
+                src={editingReview.productPhotoUrl}
+                alt="Aperçu article commandé"
+                className="w-full h-32 object-cover rounded-sm"
+                style={{ border: `1px solid ${COLORS.line}` }}
+                onError={handleImgError}
+              />
+              <button
+                onClick={removeReviewProductPhoto}
+                className="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs"
+                style={{ background: "#FF5C7A", color: "#08060D" }}
+                title="Supprimer la photo"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <div className="mb-4">
+              <GhostButton onClick={openReviewPhotoPicker}>
+                {reviewPhotoUploadStatus === "uploading" ? "Import en cours…" : "📷 Choisir depuis ma pellicule"}
+              </GhostButton>
+            </div>
+          )}
+          {reviewPhotoUploadError && (
+            <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ background: COLORS.surface2, color: "#FF5C7A", fontFamily: "Inter" }}>
+              {reviewPhotoUploadError}
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-sm mb-4" style={{ fontFamily: "Inter", color: COLORS.ink }}>
             <input type="checkbox" checked={editingReview.visible} onChange={(e) => setEditingReview({ ...editingReview, visible: e.target.checked })} /> Afficher sur le site
